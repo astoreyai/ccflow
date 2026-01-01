@@ -69,3 +69,5 @@ Thumbs.db
 # Project specific
 *.toon
 mcp_config_*.json
+*.db
+ccflow.db

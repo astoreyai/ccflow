@@ -1,12 +1,10 @@
 """Tests for session store protocol and implementations."""
 
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from ccflow.exceptions import SessionStoreError
 from ccflow.store import (
     BaseSessionStore,
     SessionFilter,
@@ -15,7 +13,6 @@ from ccflow.store import (
     SessionStatus,
 )
 from ccflow.stores import MemorySessionStore, SQLiteSessionStore
-
 
 # Fixtures
 

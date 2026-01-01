@@ -1,6 +1,5 @@
 """Tests for FastAPI Server."""
 
-import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -385,7 +384,7 @@ class TestWebSocket:
         async with AsyncClient(
             transport=ASGITransport(app=server.app),
             base_url="http://test",
-        ) as ac:
+        ):
             # WebSocket tests require different handling
             pass
 

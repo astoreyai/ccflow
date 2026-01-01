@@ -20,6 +20,9 @@ from ccflow.store import SessionMetadata, SessionStatus
 from ccflow.trace_store import BaseProjectStore, BaseTraceStore
 from ccflow.types import ProjectData, ProjectFilter, TraceData, TraceFilter, TraceStatus
 
+# Use uppercase List to avoid shadowing by class.list method
+List = list
+
 logger = structlog.get_logger(__name__)
 
 # Default database path (shared with sessions)
@@ -314,7 +317,7 @@ class SQLiteTraceStore(BaseTraceStore):
             logger.error("trace_delete_failed", trace_id=trace_id, error=str(e))
             raise SessionStoreError(f"Failed to delete trace: {e}") from e
 
-    async def list(self, filter: TraceFilter | None = None) -> list[TraceData]:
+    async def list(self, filter: TraceFilter | None = None) -> List[TraceData]:
         """List traces matching filter criteria."""
         try:
             await self._ensure_initialized()
@@ -372,7 +375,7 @@ class SQLiteTraceStore(BaseTraceStore):
 
     async def get_session_traces(
         self, session_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a session ordered by sequence."""
         try:
             await self._ensure_initialized()
@@ -398,7 +401,7 @@ class SQLiteTraceStore(BaseTraceStore):
 
     async def get_project_traces(
         self, project_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a project."""
         try:
             await self._ensure_initialized()
@@ -640,7 +643,7 @@ class SQLiteProjectStore(BaseProjectStore):
             logger.error("project_delete_failed", project_id=project_id, error=str(e))
             raise SessionStoreError(f"Failed to delete project: {e}") from e
 
-    async def list(self, filter: ProjectFilter | None = None) -> list[ProjectData]:
+    async def list(self, filter: ProjectFilter | None = None) -> List[ProjectData]:
         """List projects matching filter criteria."""
         try:
             await self._ensure_initialized()
@@ -690,7 +693,7 @@ class SQLiteProjectStore(BaseProjectStore):
 
     async def get_project_sessions(
         self, project_id: str, limit: int = 100
-    ) -> list[SessionMetadata]:
+    ) -> List[SessionMetadata]:
         """Get all sessions for a project."""
         try:
             await self._ensure_initialized()
@@ -731,7 +734,7 @@ class SQLiteProjectStore(BaseProjectStore):
             logger.error("project_get_sessions_failed", project_id=project_id, error=str(e))
             raise SessionStoreError(f"Failed to get project sessions: {e}") from e
 
-    async def get_subprojects(self, project_id: str) -> list[ProjectData]:
+    async def get_subprojects(self, project_id: str) -> List[ProjectData]:
         """Get child projects of a parent."""
         return await self.list(ProjectFilter(parent_project_id=project_id))
 

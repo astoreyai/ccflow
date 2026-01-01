@@ -1,20 +1,21 @@
 """Tests for MCP configuration module."""
 
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
+import pytest
+
+from ccflow.exceptions import MCPConfigError
 from ccflow.mcp import (
     MCPConfigManager,
-    github_server,
-    postgres_server,
-    playwright_server,
-    filesystem_server,
     custom_http_server,
+    filesystem_server,
+    github_server,
+    playwright_server,
+    postgres_server,
 )
 from ccflow.types import MCPServerConfig
-from ccflow.exceptions import MCPConfigError
 
 
 class TestMCPConfigManager:
@@ -267,7 +268,7 @@ class TestCleanup:
         """Test cleanup logs warning when file deletion fails."""
         manager = MCPConfigManager(temp_dir=tmp_path)
 
-        path = manager.create_config_file({"s": MCPServerConfig(command="c")})
+        manager.create_config_file({"s": MCPServerConfig(command="c")})
 
         # Make unlink raise an unexpected error
         with patch.object(Path, 'unlink', side_effect=PermissionError("Access denied")):
@@ -317,7 +318,7 @@ class TestErrorHandling:
         manager = MCPConfigManager(temp_dir=tmp_path)
 
         # Mock _write_config to raise an error
-        with patch.object(manager, '_write_config', side_effect=IOError("Write failed")):
+        with patch.object(manager, '_write_config', side_effect=OSError("Write failed")):
             with pytest.raises(MCPConfigError) as exc_info:
                 manager.create_config_file({"s": MCPServerConfig(command="c")})
 

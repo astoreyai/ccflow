@@ -3,21 +3,21 @@
 Covers query_simple, batch_query, and stream_to_callback.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
-from ccflow.api import query, query_simple, batch_query, stream_to_callback
+import pytest
+
+from ccflow.api import batch_query, query, query_simple, stream_to_callback
+from ccflow.exceptions import CLIExecutionError
+from ccflow.executor import CLIExecutor
 from ccflow.types import (
     CLIAgentOptions,
     InitMessage,
+    ResultMessage,
     StopMessage,
     TextMessage,
-    AssistantMessage,
-    ResultMessage,
     ToonConfig,
 )
-from ccflow.executor import CLIExecutor
-from ccflow.exceptions import CLIExecutionError
 
 
 def create_mock_executor(events):
@@ -306,7 +306,7 @@ class TestBatchQuery:
         mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
 
         with patch('ccflow.api.get_executor') as mock_get_executor, \
-             patch('ccflow.api.record_request') as mock_record, \
+             patch('ccflow.api.record_request'), \
              patch('ccflow.api.record_error'):
             mock_get_executor.return_value = mock_executor
 
@@ -390,7 +390,7 @@ class TestStreamToCallback:
              patch('ccflow.api.record_request'):
             mock_get_executor.return_value = create_mock_executor(standard_events)
 
-            result = await stream_to_callback("Test", callback)
+            await stream_to_callback("Test", callback)
 
             # Should have called callback 4 times (init, 2 text, stop)
             assert len(callback_calls) == 4
@@ -578,8 +578,14 @@ class TestQueryWithToonSavings:
 
         with patch('ccflow.api.get_executor') as mock_get_executor, \
              patch('ccflow.api.record_request'), \
-             patch('ccflow.api.record_toon_savings') as mock_toon_savings:
+             patch('ccflow.api.record_toon_savings') as mock_toon_savings, \
+             patch('ccflow.api.ToonSerializer') as mock_serializer_class:
             mock_get_executor.return_value = create_mock_executor(events)
+
+            # Mock ToonSerializer to return formatted context without overwriting token counts
+            mock_serializer = MagicMock()
+            mock_serializer.format_for_prompt.return_value = "\n<Context>\ntest\n</Context>"
+            mock_serializer_class.return_value = mock_serializer
 
             # Create config with tracking enabled
             toon_config = ToonConfig(
@@ -599,5 +605,5 @@ class TestQueryWithToonSavings:
             async for _ in query("Test", options):
                 pass
 
-            # TOON savings should be recorded
+            # TOON savings should be recorded with the pre-set values
             mock_toon_savings.assert_called_once_with(100, 60)

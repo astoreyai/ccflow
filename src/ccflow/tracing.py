@@ -164,7 +164,7 @@ class TracingSession(Session):
         response_parts: list[str] = []
         thinking_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
-        message_stream: list[dict[str, Any]] = [] if capture_detail else None
+        message_stream: list[dict[str, Any]] | None = [] if capture_detail else None
 
         try:
             # Use parent's send_message and intercept messages

@@ -5,19 +5,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ccflow.events import (
+    CostIncurredEvent,
     EventEmitter,
     SessionClosedEvent,
     SessionCreatedEvent,
     SessionErrorEvent,
-    TurnCompletedEvent,
     TokensUsedEvent,
-    CostIncurredEvent,
+    TurnCompletedEvent,
 )
 from ccflow.metrics_handlers import (
+    PROMETHEUS_AVAILABLE,
     PrometheusEventHandler,
     setup_metrics,
     start_metrics_server,
-    PROMETHEUS_AVAILABLE,
 )
 
 
@@ -138,7 +138,7 @@ class TestPrometheusEventHandler:
 
     def test_reset_metrics(self):
         """Test resetting metrics."""
-        handler = PrometheusEventHandler()
+        PrometheusEventHandler()
         PrometheusEventHandler.reset_metrics()
 
         assert PrometheusEventHandler._metrics_initialized is False
@@ -148,7 +148,7 @@ class TestPrometheusEventHandler:
     def test_metrics_are_initialized(self):
         """Test that metrics are properly initialized."""
         PrometheusEventHandler.reset_metrics()
-        handler = PrometheusEventHandler()
+        PrometheusEventHandler()
 
         assert PrometheusEventHandler._metrics_initialized is True
         assert PrometheusEventHandler._active_sessions is not None

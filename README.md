@@ -1,59 +1,77 @@
 # ccflow
 
-Production middleware bridging Claude Code CLI with SDK-like Python interfaces.
+[![PyPI version](https://img.shields.io/pypi/v/ccflow.svg)](https://pypi.org/project/ccflow/)
+[![Python versions](https://img.shields.io/pypi/pyversions/ccflow.svg)](https://pypi.org/project/ccflow/)
+[![License](https://img.shields.io/pypi/l/ccflow.svg)](https://github.com/astoreyai/ccflow/blob/main/LICENSE)
+[![Tests](https://github.com/astoreyai/ccflow/actions/workflows/ci.yml/badge.svg)](https://github.com/astoreyai/ccflow/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-86%25-brightgreen.svg)](https://github.com/astoreyai/ccflow)
 
-**ccflow** enables subscription-based usage (Pro/Max) instead of API token billing, with integrated TOON serialization for 30-60% token reduction on structured data.
+**Production middleware bridging Claude Code CLI with SDK-like Python interfaces.**
 
-## Features
+ccflow enables **subscription-based usage** (Pro/Max) instead of API token billing, with integrated TOON serialization for **30-60% token reduction** on structured data.
 
-- **SDK-Compatible API** - `query()` and `Session` interfaces matching Claude Agent SDK patterns
-- **Subscription Billing** - Route through CLI to use Pro/Max subscription credits
-- **TOON Integration** - Automatic token-optimized encoding for structured context data
-- **Streaming Support** - Real-time async iteration over CLI NDJSON output
-- **Session Management** - Multi-turn conversations via CLI `--resume`
-- **Batch Processing** - Concurrent query execution with configurable parallelism
-- **Extended Thinking** - Ultrathink mode for deeper reasoning with thinking token tracking
-- **Project & Tracing** - Hierarchical project organization with full trace recording and replay
-- **MCP Support** - Programmatic MCP server configuration
-- **Observability** - Prometheus metrics, structured logging
+---
+
+## Why ccflow?
+
+| Feature | Claude API | ccflow |
+|---------|------------|--------|
+| **Billing** | Per-token API costs | Pro/Max subscription |
+| **Auth** | API keys | CLI OAuth (already configured) |
+| **Tools** | Manual implementation | CLI's 15+ built-in tools |
+| **MCP** | Not available | Full MCP server support |
+| **Sessions** | Manual state management | Automatic persistence |
+
+---
 
 ## Installation
 
 ```bash
-# Basic installation
-pip install git+https://github.com/astoreyai/ccflow.git
+# From PyPI
+pip install ccflow
 
-# With TOON support (recommended)
-pip install "ccflow[toon] @ git+https://github.com/astoreyai/ccflow.git"
+# With TOON support (recommended for 30-60% token savings)
+pip install "ccflow[toon]"
 
-# With all extras
-pip install "ccflow[all] @ git+https://github.com/astoreyai/ccflow.git"
+# With all extras (server, tracing, API fallback)
+pip install "ccflow[all]"
 ```
 
 **Prerequisites:**
 - Python 3.11+
-- Claude Code CLI installed and authenticated (`npm install -g @anthropic-ai/claude-code`)
+- Claude Code CLI installed and authenticated:
+  ```bash
+  npm install -g @anthropic-ai/claude-code
+  claude auth login
+  ```
+
+---
 
 ## Quick Start
 
-### Basic Query
+### Simple Query
 
 ```python
-import asyncio
+from ccflow import query_simple
+
+response = await query_simple("What is 2+2?")
+print(response)  # "4"
+```
+
+### Streaming Query
+
+```python
 from ccflow import query, CLIAgentOptions, TextMessage
 
-async def main():
-    options = CLIAgentOptions(
-        model="sonnet",
-        max_turns=5,
-        allowed_tools=["Read", "Grep"],
-    )
+options = CLIAgentOptions(
+    model="sonnet",
+    max_turns=5,
+    allowed_tools=["Read", "Grep"],
+)
 
-    async for msg in query("Explain this codebase", options):
-        if isinstance(msg, TextMessage):
-            print(msg.content, end="")
-
-asyncio.run(main())
+async for msg in query("Explain this codebase", options):
+    if isinstance(msg, TextMessage):
+        print(msg.content, end="")
 ```
 
 ### Multi-Turn Session
@@ -61,65 +79,18 @@ asyncio.run(main())
 ```python
 from ccflow import Session, CLIAgentOptions
 
-async def main():
-    session = Session(options=CLIAgentOptions(model="opus"))
+session = Session(options=CLIAgentOptions(model="opus"))
 
-    # First turn
-    async for msg in session.send_message("Review this code"):
-        print(msg.content, end="")
-
-    # Follow-up (continues conversation)
-    async for msg in session.send_message("Focus on security issues"):
-        print(msg.content, end="")
-
-    # Get session stats
-    stats = await session.close()
-    print(f"Total tokens: {stats.total_tokens}")
-
-asyncio.run(main())
-```
-
-### TOON Context Injection
-
-```python
-from ccflow import query, CLIAgentOptions
-from ccflow.types import ToonConfig
-
-portfolio = {
-    "positions": [
-        {"symbol": "AAPL", "qty": 100, "pnl": 1500.00},
-        {"symbol": "GOOGL", "qty": 50, "pnl": -200.00},
-    ],
-    "cash": 50000.00,
-}
-
-options = CLIAgentOptions(
-    context=portfolio,  # Auto-TOON encoded
-    toon=ToonConfig(enabled=True, track_savings=True),
-)
-
-async for msg in query("Analyze portfolio risk", options):
+# First turn
+async for msg in session.send_message("Review this code"):
     print(msg.content, end="")
 
-# Check savings
-print(f"TOON saved {options.toon.last_compression_ratio:.1%} tokens")
-```
+# Follow-up (conversation continues)
+async for msg in session.send_message("Focus on security issues"):
+    print(msg.content, end="")
 
-### Batch Processing
-
-```python
-from ccflow import batch_query, CLIAgentOptions
-
-prompts = [
-    "Review file A for bugs",
-    "Review file B for bugs",
-    "Review file C for bugs",
-]
-
-results = await batch_query(prompts, CLIAgentOptions(model="haiku"), concurrency=3)
-
-for result in results:
-    print(f"{result.session_id}: {result.result[:100]}...")
+stats = await session.close()
+print(f"Total tokens: {stats.total_tokens}")
 ```
 
 ### Extended Thinking (Ultrathink)
@@ -127,68 +98,102 @@ for result in results:
 ```python
 from ccflow import query, CLIAgentOptions, ThinkingMessage, TextMessage
 
-# Enable extended thinking for complex reasoning tasks
 options = CLIAgentOptions(
     model="sonnet",
-    ultrathink=True,  # Enables deep reasoning mode
+    ultrathink=True,  # Enable deep reasoning
 )
 
-async for msg in query("Analyze this complex algorithm and find edge cases", options):
+async for msg in query("Analyze this algorithm for edge cases", options):
     if isinstance(msg, ThinkingMessage):
-        print(f"[Thinking] {msg.content[:100]}...")
-        print(f"  Thinking tokens: {msg.thinking_tokens}")
+        print(f"[Thinking: {msg.thinking_tokens} tokens]")
     elif isinstance(msg, TextMessage):
         print(msg.content, end="")
 ```
 
-### Project & Trace Recording
+### Batch Processing
+
+```python
+from ccflow import batch_query, CLIAgentOptions
+
+prompts = ["Review file A", "Review file B", "Review file C"]
+results = await batch_query(prompts, CLIAgentOptions(), concurrency=3)
+
+for result in results:
+    print(f"{result.session_id}: {result.result[:100]}...")
+```
+
+---
+
+## TOON Token Optimization
+
+TOON (Token-Oriented Object Notation) reduces token consumption by 30-60% for structured data:
+
+```
+JSON (47 tokens):                    TOON (20 tokens):
+{"positions": [                      positions[2]{symbol,qty,price}:
+  {"symbol":"AAPL","qty":100,...},     AAPL,100,150.25
+  {"symbol":"GOOGL","qty":50,...}      GOOGL,50,2800
+]}
+```
+
+```python
+from ccflow import query, CLIAgentOptions
+from ccflow.types import ToonConfig
+
+options = CLIAgentOptions(
+    context={"positions": [...], "cash": 50000},  # Auto-TOON encoded
+    toon=ToonConfig(enabled=True, track_savings=True),
+)
+
+async for msg in query("Analyze portfolio risk", options):
+    print(msg.content, end="")
+
+print(f"Saved {options.toon.last_compression_ratio:.1%} tokens")
+```
+
+---
+
+## Project & Trace Recording
+
+Organize sessions hierarchically and capture full traces for analysis and replay:
 
 ```python
 from ccflow import Project, CLIAgentOptions
 from ccflow.stores import SQLiteProjectStore, SQLiteTraceStore, SQLiteSessionStore
 
-# Initialize stores (same DB)
+# Initialize stores
 db_path = "ccflow.db"
-project_store = SQLiteProjectStore(db_path)
-trace_store = SQLiteTraceStore(db_path)
-session_store = SQLiteSessionStore(db_path)
-
-# Create project for organizing sessions
 project = Project(
-    name="Code Review Analysis",
-    description="Analyzing code review patterns",
-    store=project_store,
-    trace_store=trace_store,
-    session_store=session_store,
+    name="Code Review",
+    store=SQLiteProjectStore(db_path),
+    trace_store=SQLiteTraceStore(db_path),
+    session_store=SQLiteSessionStore(db_path),
 )
 await project.save()
 
-# Create session with full trace recording
+# Create traced session
 session = project.create_session(
     options=CLIAgentOptions(model="sonnet", ultrathink=True),
     detailed=True,  # Capture message-level stream
 )
 
-async for msg in session.send_message("Analyze this function for bugs"):
+async for msg in session.send_message("Analyze this function"):
     print(msg.content, end="")
 
-# Access recorded trace
+# Access trace
 trace = session.last_trace
-print(f"\nThinking tokens: {trace.thinking_tokens}")
+print(f"Thinking tokens: {trace.thinking_tokens}")
 print(f"Tool calls: {len(trace.tool_calls)}")
-print(f"Duration: {trace.duration_ms}ms")
+print(f"Cost: ${trace.cost_usd:.4f}")
 
-# Get aggregate stats
-summary = await project.get_trace_summary()
-print(f"Total traces: {summary['total_traces']}")
-print(f"Total cost: ${summary['total_cost_usd']:.4f}")
-
-# Replay a trace with different options
+# Replay with different model
 new_session = await project.replay_as_new(
     trace.trace_id,
     options_override=CLIAgentOptions(model="opus"),
 )
 ```
+
+---
 
 ## Architecture
 
@@ -214,32 +219,24 @@ new_session = await project.replay_as_new(
 └─────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CCFLOW_DEFAULT_MODEL` | Default model | `sonnet` |
-| `CCFLOW_DEFAULT_TIMEOUT` | Query timeout (seconds) | `300` |
-| `CCFLOW_TOON_ENABLED` | Enable TOON encoding | `true` |
-| `CCFLOW_LOG_LEVEL` | Logging level | `INFO` |
-| `CCFLOW_ENABLE_METRICS` | Enable Prometheus metrics | `true` |
 
 ### CLIAgentOptions
 
 ```python
 CLIAgentOptions(
     # Model
-    model="sonnet",              # Model alias or full name
-    fallback_model="haiku",      # Fallback on overload
+    model="sonnet",              # haiku, sonnet, opus
+    fallback_model="haiku",      # On overload
 
     # System prompt
     system_prompt=None,          # Replace system prompt
     append_system_prompt=None,   # Append to system prompt
 
     # Permissions
-    permission_mode=PermissionMode.ASK,
+    permission_mode=PermissionMode.DEFAULT,
     allowed_tools=["Read", "Edit"],
     disallowed_tools=["Bash(rm:*)"],
 
@@ -252,30 +249,84 @@ CLIAgentOptions(
     timeout=300.0,
 
     # Extended thinking
-    ultrathink=False,            # Enable deep reasoning mode
+    ultrathink=False,            # Enable deep reasoning
 
-    # TOON
+    # Context
+    context={"data": "value"},   # Auto-TOON encoded
     toon=ToonConfig(enabled=True),
-    context={"data": "to inject"},  # Auto-encoded
 
     # MCP
     mcp_servers={"github": MCPServerConfig(...)},
 )
 ```
 
-## TOON Serialization
+### Environment Variables
 
-TOON (Token-Oriented Object Notation) reduces token consumption by 30-60% for structured data:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CCFLOW_DEFAULT_MODEL` | Default model | `sonnet` |
+| `CCFLOW_DEFAULT_TIMEOUT` | Timeout (seconds) | `300` |
+| `CCFLOW_TOON_ENABLED` | Enable TOON encoding | `true` |
+| `CCFLOW_LOG_LEVEL` | Logging level | `INFO` |
+| `CCFLOW_ENABLE_METRICS` | Enable Prometheus | `true` |
 
+---
+
+## Message Types
+
+```python
+Message = (
+    InitMessage |           # Session initialization
+    TextMessage |           # Text content from Claude
+    ThinkingMessage |       # Extended thinking content
+    ToolUseMessage |        # Tool invocation
+    ToolResultMessage |     # Tool execution result
+    ErrorMessage |          # Error from CLI
+    StopMessage |           # Turn completion with usage
+    ResultMessage |         # Final result
+    UnknownMessage          # Forward-compatible fallback
+)
 ```
-JSON (47 tokens):                    TOON (20 tokens):
-{"positions": [                      positions[2]{symbol,qty,price}:
-  {"symbol":"AAPL","qty":100,...},     AAPL,100,150.25
-  {"symbol":"GOOGL","qty":50,...}      GOOGL,50,2800
-]}
+
+---
+
+## Reliability Features
+
+### Rate Limiting
+
+```python
+from ccflow import CombinedLimiter
+
+limiter = CombinedLimiter(rate=10.0, max_concurrent=5)
+async with limiter.acquire():
+    # rate-limited operation
 ```
 
-See [docs/TOON_RESEARCH.md](docs/TOON_RESEARCH.md) for the complete specification.
+### Circuit Breaker
+
+```python
+from ccflow import CircuitBreaker, CircuitBreakerConfig
+
+breaker = CircuitBreaker(CircuitBreakerConfig(
+    failure_threshold=5,
+    recovery_timeout=30.0,
+))
+async with breaker.call():
+    # protected operation
+```
+
+### Retry with Backoff
+
+```python
+from ccflow import retry_with_backoff, RetryConfig
+
+result = await retry_with_backoff(
+    async_func,
+    RetryConfig(max_retries=3, base_delay=1.0, exponential=True),
+)
+```
+
+---
 
 ## CLI Usage
 
@@ -289,9 +340,30 @@ ccflow -m opus "Review for security"
 # Streaming mode
 ccflow --stream "Analyze the codebase"
 
-# Pipe input
-cat file.py | ccflow "Explain this"
+# Session management
+ccflow sessions --list
+ccflow sessions --resume <session-id>
+
+# HTTP server
+ccflow server --port 8080
 ```
+
+---
+
+## Docker
+
+```bash
+# Build
+docker build -t ccflow .
+
+# Run (mount Claude credentials)
+docker run -v ~/.claude:/home/ccflow/.claude ccflow
+
+# Docker Compose (with Prometheus/Grafana)
+docker compose up
+```
+
+---
 
 ## Development
 
@@ -305,18 +377,32 @@ pip install -e ".[dev]"
 pytest
 
 # Type checking
-mypy src/
+mypy src/ccflow/
 
 # Lint
 ruff check src/ tests/
 ```
 
+---
+
+## API Reference
+
+See [docs/api.md](docs/api.md) for complete API documentation.
+
+For LLM-friendly documentation, see [LLMS.txt](LLMS.txt).
+
+---
+
 ## License
 
-MIT
+[MIT](LICENSE)
 
-## Related
+---
 
+## Links
+
+- [Documentation](https://github.com/astoreyai/ccflow#readme)
+- [PyPI](https://pypi.org/project/ccflow/)
+- [Changelog](CHANGELOG.md)
 - [Claude Code CLI](https://code.claude.com/)
-- [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
 - [TOON Format](https://toonformat.dev/)

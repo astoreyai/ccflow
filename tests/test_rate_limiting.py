@@ -9,8 +9,8 @@ from ccflow.rate_limiting import (
     CombinedLimiter,
     ConcurrencyLimiter,
     ConcurrencyLimitExceededError,
-    RateLimitExceededError,
     RateLimiterStats,
+    RateLimitExceededError,
     RetryConfig,
     RetryHandler,
     SlidingWindowRateLimiter,
@@ -77,7 +77,7 @@ class TestTokenBucketRateLimiter:
     async def test_acquire_multiple(self):
         """Test multiple acquisitions within burst."""
         limiter = TokenBucketRateLimiter(rate=60, burst=5)
-        for i in range(5):
+        for _i in range(5):
             wait_time = await limiter.acquire()
             assert wait_time == 0.0
 
@@ -674,7 +674,7 @@ class TestExecutorIntegration:
     @pytest.mark.asyncio
     async def test_executor_with_limiter(self):
         """Test executor uses limiter."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from ccflow.executor import CLIExecutor
         from ccflow.rate_limiting import CombinedLimiter

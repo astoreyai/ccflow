@@ -1,8 +1,7 @@
 """Tests for reliability module - circuit breaker, retry, health check, correlation IDs."""
 
 import asyncio
-import time
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,7 +11,6 @@ from ccflow.reliability import (
     CircuitBreakerError,
     CircuitState,
     HealthChecker,
-    HealthStatus,
     RetryConfig,
     RetryExhaustedError,
     calculate_delay,
@@ -25,7 +23,6 @@ from ccflow.reliability import (
     set_correlation_id,
     with_retry,
 )
-
 
 # =============================================================================
 # Correlation ID Tests

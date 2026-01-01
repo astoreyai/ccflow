@@ -1,11 +1,12 @@
 """Tests for ccflow configuration module."""
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 import structlog
 
-from ccflow.config import CCFlowSettings, get_settings, configure_logging
+from ccflow.config import CCFlowSettings, configure_logging, get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -173,7 +174,7 @@ class TestGetSettings:
 
     def test_cache_can_be_cleared(self):
         """Test cache can be cleared for fresh settings."""
-        settings1 = get_settings()
+        get_settings()
         get_settings.cache_clear()
         settings2 = get_settings()
 
@@ -312,7 +313,7 @@ class TestSettingsEdgeCases:
     def test_empty_string_env_vars(self):
         """Test empty string environment variables."""
         with patch.dict(os.environ, {"CCFLOW_FALLBACK_MODEL": ""}):
-            settings = CCFlowSettings()
+            CCFlowSettings()
             # Empty string should be treated as empty, not None
             # Behavior depends on pydantic version
 

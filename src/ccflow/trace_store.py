@@ -14,6 +14,9 @@ import structlog
 
 from ccflow.types import ProjectData, ProjectFilter, TraceData, TraceFilter, TraceStatus
 
+# Use uppercase List to avoid shadowing by Protocol.list method
+List = list
+
 if TYPE_CHECKING:
     from datetime import timedelta
 
@@ -75,7 +78,7 @@ class TraceStore(Protocol):
         """
         ...
 
-    async def list(self, filter: TraceFilter | None = None) -> list[TraceData]:
+    async def list(self, filter: TraceFilter | None = None) -> List[TraceData]:
         """List traces matching filter criteria.
 
         Args:
@@ -91,7 +94,7 @@ class TraceStore(Protocol):
 
     async def get_session_traces(
         self, session_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a session.
 
         Args:
@@ -105,7 +108,7 @@ class TraceStore(Protocol):
 
     async def get_project_traces(
         self, project_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a project.
 
         Args:
@@ -199,7 +202,7 @@ class ProjectStore(Protocol):
         """
         ...
 
-    async def list(self, filter: ProjectFilter | None = None) -> list[ProjectData]:
+    async def list(self, filter: ProjectFilter | None = None) -> List[ProjectData]:
         """List projects matching filter criteria.
 
         Args:
@@ -215,7 +218,7 @@ class ProjectStore(Protocol):
 
     async def get_project_sessions(
         self, project_id: str, limit: int = 100
-    ) -> list[SessionMetadata]:
+    ) -> List[SessionMetadata]:
         """Get all sessions for a project.
 
         Args:
@@ -227,7 +230,7 @@ class ProjectStore(Protocol):
         """
         ...
 
-    async def get_subprojects(self, project_id: str) -> list[ProjectData]:
+    async def get_subprojects(self, project_id: str) -> List[ProjectData]:
         """Get child projects of a parent.
 
         Args:
@@ -276,19 +279,19 @@ class BaseTraceStore(ABC):
         pass
 
     @abstractmethod
-    async def list(self, filter: TraceFilter | None = None) -> list[TraceData]:
+    async def list(self, filter: TraceFilter | None = None) -> List[TraceData]:
         """List traces matching filter criteria."""
         pass
 
     async def get_session_traces(
         self, session_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a session."""
         return await self.list(TraceFilter(session_id=session_id, limit=limit))
 
     async def get_project_traces(
         self, project_id: str, limit: int = 100
-    ) -> list[TraceData]:
+    ) -> List[TraceData]:
         """Get all traces for a project."""
         return await self.list(TraceFilter(project_id=project_id, limit=limit))
 
@@ -354,18 +357,18 @@ class BaseProjectStore(ABC):
         pass
 
     @abstractmethod
-    async def list(self, filter: ProjectFilter | None = None) -> list[ProjectData]:
+    async def list(self, filter: ProjectFilter | None = None) -> List[ProjectData]:
         """List projects matching filter criteria."""
         pass
 
     @abstractmethod
     async def get_project_sessions(
         self, project_id: str, limit: int = 100
-    ) -> list[SessionMetadata]:
+    ) -> List[SessionMetadata]:
         """Get all sessions for a project."""
         pass
 
-    async def get_subprojects(self, project_id: str) -> list[ProjectData]:
+    async def get_subprojects(self, project_id: str) -> List[ProjectData]:
         """Get child projects of a parent."""
         return await self.list(ProjectFilter(parent_project_id=project_id))
 

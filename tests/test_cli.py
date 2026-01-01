@@ -1,10 +1,7 @@
 """Tests for CLI entry point module."""
 
 import argparse
-import asyncio
-import sys
-from datetime import datetime, timedelta
-from io import StringIO
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -648,7 +645,7 @@ class TestRunQuery:
             yield mock_msg
 
         with patch("ccflow.cli.query", side_effect=mock_query_gen):
-            with patch("builtins.print") as mock_print:
+            with patch("builtins.print"):
                 result = await run_query(mock_args)
 
             assert result == 0
@@ -894,7 +891,7 @@ class TestRunSessions:
         mock_manager.__aexit__ = AsyncMock(return_value=None)
 
         with patch("ccflow.manager.SessionManager", return_value=mock_manager):
-            with patch("builtins.print") as mock_print:
+            with patch("builtins.print"):
                 result = await run_sessions(args)
 
         assert result == 0

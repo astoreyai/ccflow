@@ -1,6 +1,5 @@
 """Tests for API client module - direct Anthropic SDK integration and fallback."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,9 +7,7 @@ import pytest
 from ccflow.api_client import (
     APIClient,
     APIClientConfig,
-    APIClientError,
     APINotAvailableError,
-    APIRateLimitError,
     APIResponse,
     FallbackConfig,
     FallbackExecutor,
@@ -19,8 +16,6 @@ from ccflow.api_client import (
     reset_api_client,
     reset_fallback_executor,
 )
-from ccflow.types import CLIAgentOptions
-
 
 # =============================================================================
 # APIClientConfig Tests

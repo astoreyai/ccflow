@@ -1,7 +1,7 @@
 """Tests for process pool module - concurrent CLI execution."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +18,6 @@ from ccflow.pool import (
     reset_pools,
 )
 from ccflow.types import CLIAgentOptions
-
 
 # =============================================================================
 # PoolConfig Tests
@@ -207,7 +206,7 @@ class TestProcessPool:
 
         async with pool:
             # Submit multiple tasks
-            task1 = await pool.submit("Task 1")
+            await pool.submit("Task 1")
             task2 = await pool.submit("Task 2")
 
             # Cancel second task before it runs

@@ -1,13 +1,11 @@
 """Tests for pricing module - cost calculation and usage tracking."""
 
-import pytest
 
 from ccflow.pricing import (
     HAIKU_PRICING,
     OPUS_PRICING,
     SONNET_PRICING,
     ModelPricing,
-    ModelTier,
     UsageStats,
     calculate_cost,
     extract_model_from_events,
@@ -17,7 +15,6 @@ from ccflow.pricing import (
     reset_usage_tracker,
     track_usage,
 )
-
 
 # =============================================================================
 # ModelPricing Tests

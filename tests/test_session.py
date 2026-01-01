@@ -1,19 +1,19 @@
 """Tests for session management."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import uuid
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from ccflow.executor import CLIExecutor
 from ccflow.session import Session, resume_session
 from ccflow.types import (
     CLIAgentOptions,
     InitMessage,
+    PermissionMode,
+    SessionStats,
     StopMessage,
     TextMessage,
-    SessionStats,
-    PermissionMode,
 )
-from ccflow.executor import CLIExecutor
 
 
 class TestSessionInit:

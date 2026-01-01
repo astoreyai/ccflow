@@ -1,9 +1,7 @@
 """Tests for stream parser."""
 
-import pytest
 
 from ccflow.parser import (
-    StreamParser,
     collect_text,
     collect_thinking,
     extract_session_id,
@@ -27,7 +25,6 @@ from ccflow.types import (
     UnknownSystemMessage,
     UserMessage,
 )
-from ccflow.exceptions import ParseError
 
 
 class TestStreamParser:

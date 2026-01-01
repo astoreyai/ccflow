@@ -1,7 +1,8 @@
 """Tests for ccflow metrics module."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestMetricsDisabled:
@@ -212,9 +213,8 @@ class TestTimedOperation:
 
         with patch("ccflow.metrics.record_request") as mock_record, \
              patch("ccflow.metrics.record_error") as mock_error:
-            with pytest.raises(ValueError):
-                with timed_operation("sonnet", "test_op") as result:
-                    raise ValueError("Test error")
+            with pytest.raises(ValueError), timed_operation("sonnet", "test_op"):
+                raise ValueError("Test error")
 
             # Should have recorded error
             mock_error.assert_called_once_with("ValueError")
@@ -224,10 +224,11 @@ class TestTimedOperation:
     def test_timed_operation_measures_duration(self):
         """Test timed_operation accurately measures duration."""
         import time
+
         from ccflow.metrics import timed_operation
 
         with patch("ccflow.metrics.record_request") as mock_record:
-            with timed_operation("sonnet") as result:
+            with timed_operation("sonnet"):
                 time.sleep(0.01)  # 10ms
 
             duration = mock_record.call_args.kwargs["duration"]
@@ -277,11 +278,11 @@ class TestPrometheusAvailability:
         """Test all metrics are noop when prometheus unavailable."""
         with patch("ccflow.metrics.PROMETHEUS_AVAILABLE", False):
             from ccflow.metrics import (
-                record_request,
-                record_toon_savings,
                 record_error,
-                track_session,
+                record_request,
                 record_session_complete,
+                record_toon_savings,
+                track_session,
             )
 
             # None of these should raise

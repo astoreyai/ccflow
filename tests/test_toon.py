@@ -1,17 +1,18 @@
 """Tests for TOON integration."""
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 import pytest
 
+from ccflow.exceptions import ToonEncodingError
 from ccflow.toon_integration import (
-    ToonSerializer,
-    should_use_toon,
-    encode_context,
     TOON_AVAILABLE,
+    ToonSerializer,
+    encode_context,
+    should_use_toon,
 )
 from ccflow.types import ToonConfig
-from ccflow.exceptions import ToonEncodingError
 
 
 class TestToonSerializer:

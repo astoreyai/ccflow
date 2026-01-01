@@ -90,7 +90,7 @@ class ToonSerializer:
                 "lengthMarker": "#" if self.config.length_marker else "",
             }
 
-            toon_str = toon_encode(data, options)
+            toon_str = toon_encode(data, options)  # type: ignore[arg-type]
 
             if self.config.track_savings:
                 self._track_savings(data, toon_str)
@@ -124,7 +124,7 @@ class ToonSerializer:
             raise ToonEncodingError("TOON library not installed. Cannot decode TOON format.")
 
         try:
-            return toon_decode(toon_str, {"strict": True})
+            return toon_decode(toon_str, {"strict": True})  # type: ignore[arg-type]
         except Exception as e:
             raise ToonEncodingError(f"TOON decode failed: {e}") from e
 

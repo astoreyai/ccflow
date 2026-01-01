@@ -5,32 +5,6 @@ All notable changes to ccflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- **Project & Trace System** - Hierarchical organization with full prompt trace recording
-  - `Project` class for organizing related sessions under projects
-  - `TracingSession` - Session subclass that auto-records full traces
-  - `TraceData` - Complete capture of prompt/response/thinking/tools per turn
-  - `TraceStatus` enum (pending, success, error, cancelled)
-  - `ProjectData`, `ProjectFilter`, `TraceFilter` dataclasses
-  - `TraceStore` and `ProjectStore` protocols
-  - `SQLiteTraceStore` and `SQLiteProjectStore` implementations
-  - Nested sub-projects via `parent_project_id`
-  - Replay capability: `replay_as_new()` and `replay_fork()` methods
-  - Message-level detail capture with `detailed=True` option
-  - Aggregate analysis via `get_trace_summary()`
-  - Schema migration from v1 to v2 (adds project_id to sessions)
-
-- **Extended Thinking (Ultrathink)** - Full support for Claude's extended thinking mode
-  - `ultrathink` option in `CLIAgentOptions` to enable deep reasoning
-  - `ThinkingMessage` type for thinking content blocks
-  - `ThinkingReceivedEvent` for event-driven thinking tracking
-  - `thinking_tokens` field in `TurnCompletedEvent`, `TokensUsedEvent`, `CostIncurredEvent`
-  - Parser helpers: `collect_thinking()`, `extract_thinking_from_assistant()`, `extract_thinking_tokens()`
-  - Auto-prepends "ultrathink" prefix to prompts when enabled
-
 ## [0.1.0] - 2026-01-01
 
 ### Added
@@ -38,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Core API
 - `query()` - Async streaming query with typed messages
 - `query_simple()` - Simple string response
-- `batch_query()` - Concurrent batch processing
+- `batch_query()` - Concurrent batch processing with configurable parallelism
 - `stream_to_callback()` - Callback-based streaming
 
 #### Session Management
@@ -46,6 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SessionManager` for lifecycle management
 - `load_session()` and `resume_session()` helpers
 - Auto-persistence with configurable stores
+
+#### Project & Trace System
+- `Project` class for hierarchical organization of sessions
+- `TracingSession` - Session subclass that auto-records full traces
+- `TraceData` - Complete capture of prompt/response/thinking/tools per turn
+- `TraceStatus` enum (pending, success, error, cancelled)
+- `TraceStore` and `ProjectStore` protocols
+- `SQLiteTraceStore` and `SQLiteProjectStore` implementations
+- Nested sub-projects via `parent_project_id`
+- Replay capability: `replay_as_new()` and `replay_fork()` methods
+- Message-level detail capture with `detailed=True` option
+- Aggregate analysis via `get_trace_summary()`
+
+#### Extended Thinking (Ultrathink)
+- `ultrathink` option in `CLIAgentOptions` to enable deep reasoning
+- `ThinkingMessage` type for thinking content blocks
+- `ThinkingReceivedEvent` for event-driven thinking tracking
+- `thinking_tokens` field in usage events
+- Parser helpers: `collect_thinking()`, `extract_thinking_from_assistant()`
 
 #### Storage
 - `SQLiteSessionStore` - Async SQLite persistence
@@ -55,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Message Types
 - 11 typed message variants (InitMessage, TextMessage, ToolUseMessage, etc.)
-- Forward-compatible UnknownMessage for new event types
+- Forward-compatible `UnknownMessage` for new event types
 - Full type hints and dataclass-based definitions
 
 #### Configuration
@@ -64,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MCPServerConfig` - MCP server configuration
 - `PermissionMode` enum for tool permissions
 - Environment variable support (CCFLOW_* prefix)
+
+#### TOON Integration
+- `ToonSerializer` for token-optimized encoding (30-60% savings)
+- Automatic context injection into system prompts
+- Token savings tracking and metrics
+- Fallback to JSON when TOON unavailable
 
 #### Reliability
 - `CircuitBreaker` with configurable thresholds
@@ -75,57 +74,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Events & Observability
 - `EventEmitter` with pub/sub pattern
-- 13 event types (SESSION_CREATED, TURN_COMPLETED, etc.)
+- 15 event types (SESSION_CREATED, TURN_COMPLETED, THINKING_RECEIVED, etc.)
 - `CostTracker` for usage monitoring
-- `LoggingHandler` and `MetricsHandler`
 - Correlation ID support via context variables
+- Prometheus metrics integration
 
 #### Pricing & Cost Tracking
 - `ModelPricing` for haiku/sonnet/opus tiers
 - `calculate_cost()` function
 - `UsageStats` for aggregate tracking
 - Per-model usage breakdown
-- Batch discount support
 
 #### Process Pool
 - `ProcessPool` for concurrent CLI execution
 - `StreamingPool` for streaming results
 - Configurable workers and queue size
-- Task management (submit, cancel, gather)
 
 #### API Fallback (Optional)
 - `APIClient` for direct Anthropic SDK
 - `FallbackExecutor` for automatic CLI→API fallback
-- Configurable fallback triggers (circuit open, health fail)
 - Requires `pip install ccflow[api]`
+
+#### CLI
+- `ccflow` command-line interface
+- Model selection, streaming, session management
+- HTTP server mode with `ccflow server`
 
 #### Docker Support
 - Multi-stage Dockerfile with Claude CLI
 - docker-compose.yml with dev/prod profiles
 - Prometheus and Grafana integration
-- Health checks and resource limits
 
 #### Documentation
-- Comprehensive API reference (docs/api.md)
+- Comprehensive README with examples
+- API reference (docs/api.md)
 - Architecture documentation (docs/architecture.md)
 - LLM-friendly LLMS.txt
-- Inline docstrings throughout
+- TOON format research (docs/TOON_RESEARCH.md)
 
 ### Dependencies
-- Required: pydantic, pydantic-settings, structlog, aiosqlite
-- Optional: tiktoken, prometheus-client, opentelemetry, fastapi, uvicorn, anthropic
+
+**Required:**
+- pydantic>=2.0
+- pydantic-settings>=2.0
+- structlog>=23.0
+- aiosqlite>=0.19
+- tiktoken>=0.5
+- prometheus-client>=0.17
+- uvicorn[standard]>=0.23
+
+**Optional:**
+- `[toon]`: toon-format>=0.1.0
+- `[tracing]`: opentelemetry-api, opentelemetry-sdk
+- `[server]`: fastapi, websockets
+- `[api]`: anthropic>=0.25.0
+- `[dev]`: pytest, pytest-asyncio, pytest-cov, ruff, mypy, pre-commit
 
 ### Testing
-- 807+ test functions
-- 80%+ coverage target
+
+- 879 test functions
+- 86% code coverage
 - pytest-asyncio for async tests
 - Comprehensive mocking and fixtures
 
 ---
 
-## Version History
-
-- **0.1.0** (2026-01-01) - Initial release
-
-[Unreleased]: https://github.com/astoreyai/ccflow/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/astoreyai/ccflow/releases/tag/v0.1.0

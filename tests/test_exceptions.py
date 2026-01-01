@@ -1,6 +1,5 @@
 """Tests for ccflow custom exceptions."""
 
-import pytest
 
 from ccflow.exceptions import (
     CCFlowError,

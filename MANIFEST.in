@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+recursive-include src/ccflow *.py py.typed
+recursive-include docs *.md

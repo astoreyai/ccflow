@@ -4,18 +4,18 @@ These tests verify the complete flow from API to CLI execution.
 Some tests require the Claude CLI to be available and authenticated.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-import asyncio
 
 from ccflow import (
-    query,
-    CLIAgentOptions,
-    TextMessage,
     AssistantMessage,
+    CLIAgentOptions,
     InitMessage,
-    StopMessage,
     PermissionMode,
+    StopMessage,
+    TextMessage,
+    query,
 )
 from ccflow.executor import CLIExecutor
 from ccflow.parser import StreamParser
@@ -214,7 +214,6 @@ class TestToonIntegration:
     def test_should_use_toon_non_uniform_array(self):
         """Test TOON heuristic rejects non-uniform arrays."""
         # Non-uniform array should not use TOON (different keys)
-        non_uniform = {"items": [{"a": 1}, {"b": 2}, {"a": 3, "c": 4}]}
         # This has non-uniform keys so should_use_toon returns False
         # But if items < 4, it won't trigger uniform array check
         small_non_uniform = {"items": [{"a": 1}, {"b": 2}]}
@@ -662,7 +661,7 @@ class TestMultiTurnIntegration:
         text_msgs = [m for m in messages if isinstance(m, TextMessage)]
         assert len(text_msgs) == 3
 
-        from ccflow.types import ToolUseMessage, ToolResultMessage
+        from ccflow.types import ToolResultMessage, ToolUseMessage
         tool_use_msgs = [m for m in messages if isinstance(m, ToolUseMessage)]
         tool_result_msgs = [m for m in messages if isinstance(m, ToolResultMessage)]
 
@@ -767,6 +766,7 @@ class TestMetricsIntegration:
     async def test_query_records_error_metrics_on_failure(self):
         """Test that query() records error metrics on failure."""
         from unittest.mock import patch
+
         from ccflow.exceptions import CLIExecutionError
 
         async def mock_execute_error(*args, **kwargs):
@@ -808,7 +808,7 @@ class TestMetricsIntegration:
 
         with patch('ccflow.api.get_executor') as mock_get_executor, \
              patch('ccflow.api.record_request'), \
-             patch('ccflow.api.record_toon_savings') as mock_record_toon:
+             patch('ccflow.api.record_toon_savings'):
             mock_executor = MagicMock()
             mock_executor.execute = mock_execute
             mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
@@ -882,9 +882,10 @@ class TestMCPIntegration:
 
     def test_mcp_config_file_created(self):
         """Test that MCP config file is created with correct content."""
-        from ccflow.types import MCPServerConfig
         import json
         from pathlib import Path
+
+        from ccflow.types import MCPServerConfig
 
         executor = CLIExecutor(cli_path="/usr/bin/claude")
         options = CLIAgentOptions(
@@ -920,8 +921,8 @@ class TestMCPIntegration:
 
     def test_executor_cleanup_removes_mcp_configs(self):
         """Test that executor cleanup removes MCP config files."""
+
         from ccflow.types import MCPServerConfig
-        from pathlib import Path
 
         executor = CLIExecutor(cli_path="/usr/bin/claude")
 

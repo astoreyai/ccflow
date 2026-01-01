@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from ccflow.project import Project
-from ccflow.stores.traces import SQLiteProjectStore, SQLiteTraceStore
 from ccflow.stores import SQLiteSessionStore
+from ccflow.stores.traces import SQLiteProjectStore, SQLiteTraceStore
 from ccflow.tracing import TracingSession, create_tracing_session
 from ccflow.types import (
     CLIAgentOptions,
@@ -583,3 +580,372 @@ class TestIntegration:
         assert summary["total_cost_usd"] == 0.03
         assert summary["success_count"] == 3
         assert summary["error_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_traces_with_subprojects(self, project: Project) -> None:
+        """Test getting traces including subprojects."""
+        trace_store = project._trace_store
+
+        # Create a subproject
+        subproject = project.create_subproject("Sub", "Subproject")
+        await subproject.save()
+
+        # Add traces to parent project
+        parent_trace = TraceData(
+            trace_id="parent-trace",
+            session_id="parent-session",
+            project_id=project.project_id,
+            status=TraceStatus.SUCCESS,
+        )
+        await trace_store.save(parent_trace)
+
+        # Add traces to subproject
+        child_trace = TraceData(
+            trace_id="child-trace",
+            session_id="child-session",
+            project_id=subproject.project_id,
+            status=TraceStatus.SUCCESS,
+        )
+        await trace_store.save(child_trace)
+
+        # Get traces without subprojects
+        traces_only_parent = await project.get_traces(include_subprojects=False)
+        assert len(traces_only_parent) == 1
+        assert traces_only_parent[0].trace_id == "parent-trace"
+
+        # Get traces including subprojects
+        traces_with_subs = await project.get_traces(include_subprojects=True)
+        assert len(traces_with_subs) == 2
+        trace_ids = {t.trace_id for t in traces_with_subs}
+        assert trace_ids == {"parent-trace", "child-trace"}
+
+    @pytest.mark.asyncio
+    async def test_replay_as_new(self, project: Project) -> None:
+        """Test replaying a trace as a new session."""
+        trace_store = project._trace_store
+
+        # Create a trace to replay
+        original_trace = TraceData(
+            trace_id="original-trace",
+            session_id="original-session",
+            project_id=project.project_id,
+            prompt="Analyze this code",
+            response="The code does X",
+            options_snapshot={"model": "sonnet", "timeout": 300.0},
+            status=TraceStatus.SUCCESS,
+        )
+        await trace_store.save(original_trace)
+
+        # Replay with different options
+        new_session = await project.replay_as_new(
+            "original-trace",
+            options_override=CLIAgentOptions(model="opus"),
+            detailed=True,
+        )
+
+        assert isinstance(new_session, TracingSession)
+        assert new_session.project_id == project.project_id
+        assert new_session._current_trace is not None
+        assert new_session._current_trace.parent_trace_id == "original-trace"
+        assert new_session._current_trace.prompt == "Analyze this code"
+
+    @pytest.mark.asyncio
+    async def test_replay_as_new_not_found(self, project: Project) -> None:
+        """Test replay_as_new with nonexistent trace."""
+        with pytest.raises(ValueError, match="not found"):
+            await project.replay_as_new("nonexistent-trace")
+
+    @pytest.mark.asyncio
+    async def test_replay_as_new_no_store(self) -> None:
+        """Test replay_as_new without trace store."""
+        project = Project(name="No Store")
+        with pytest.raises(ValueError, match="No trace store"):
+            await project.replay_as_new("some-trace")
+
+    @pytest.mark.asyncio
+    async def test_replay_fork(self, project: Project) -> None:
+        """Test forking from a trace."""
+        trace_store = project._trace_store
+
+        # Create a trace to fork
+        original_trace = TraceData(
+            trace_id="fork-trace",
+            session_id="fork-session",
+            project_id=project.project_id,
+            prompt="Start conversation",
+            options_snapshot={"model": "sonnet", "timeout": 300.0},
+            status=TraceStatus.SUCCESS,
+        )
+        await trace_store.save(original_trace)
+
+        # Fork with overrides
+        forked_session = await project.replay_fork(
+            "fork-trace",
+            options_override=CLIAgentOptions(model="opus"),
+        )
+
+        assert isinstance(forked_session, TracingSession)
+        assert forked_session.project_id == project.project_id
+        assert forked_session._is_first_message is False  # Marked as forked
+
+    @pytest.mark.asyncio
+    async def test_replay_fork_not_found(self, project: Project) -> None:
+        """Test replay_fork with nonexistent trace."""
+        with pytest.raises(ValueError, match="not found"):
+            await project.replay_fork("nonexistent-trace")
+
+    @pytest.mark.asyncio
+    async def test_replay_fork_no_store(self) -> None:
+        """Test replay_fork without trace store."""
+        project = Project(name="No Store")
+        with pytest.raises(ValueError, match="No trace store"):
+            await project.replay_fork("some-trace")
+
+    @pytest.mark.asyncio
+    async def test_get_traces_empty_without_store(self) -> None:
+        """Test get_traces returns empty list without store."""
+        project = Project(name="No Store")
+        traces = await project.get_traces()
+        assert traces == []
+
+    @pytest.mark.asyncio
+    async def test_get_subprojects_without_store(self) -> None:
+        """Test get_subprojects returns empty list without store."""
+        project = Project(name="No Store")
+        subprojects = await project.get_subprojects()
+        assert subprojects == []
+
+
+class TestProjectOptionsConversion:
+    """Tests for options conversion methods."""
+
+    def test_options_to_dict(self) -> None:
+        """Test converting CLIAgentOptions to dict."""
+        project = Project(name="Test")
+        options = CLIAgentOptions(
+            model="sonnet",
+            fallback_model="haiku",
+            system_prompt="You are helpful",
+            timeout=120.0,
+            ultrathink=True,
+        )
+
+        result = project._options_to_dict(options)
+
+        assert result["model"] == "sonnet"
+        assert result["fallback_model"] == "haiku"
+        assert result["system_prompt"] == "You are helpful"
+        assert result["timeout"] == 120.0
+        assert result["ultrathink"] is True
+
+    def test_dict_to_options(self) -> None:
+        """Test converting dict back to CLIAgentOptions."""
+        project = Project(name="Test")
+        opts_dict = {
+            "model": "opus",
+            "fallback_model": "sonnet",
+            "system_prompt": "Be concise",
+            "timeout": 60.0,
+            "ultrathink": True,
+            "permission_mode": "bypassPermissions",
+        }
+
+        options = project._dict_to_options(opts_dict)
+
+        assert options.model == "opus"
+        assert options.fallback_model == "sonnet"
+        assert options.system_prompt == "Be concise"
+        assert options.timeout == 60.0
+        assert options.ultrathink is True
+
+    def test_dict_to_options_defaults(self) -> None:
+        """Test dict_to_options with minimal dict."""
+        project = Project(name="Test")
+        opts_dict = {}
+
+        options = project._dict_to_options(opts_dict)
+
+        assert options.model == "sonnet"
+        assert options.timeout == 300.0
+        assert options.ultrathink is False
+
+
+class TestTracingSessionAdvanced:
+    """Advanced tests for TracingSession send_message functionality."""
+
+    @pytest.fixture
+    def db_path(self) -> Path:
+        """Create temporary database path."""
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            return Path(f.name)
+
+    @pytest.fixture
+    async def session_with_stores(self, db_path: Path):
+        """Create tracing session with stores."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        trace_store = SQLiteTraceStore(db_path)
+        session_store = SQLiteSessionStore(db_path)
+
+        # Create a mock executor
+        mock_executor = MagicMock()
+        mock_executor.execute = AsyncMock()
+
+        session = TracingSession(
+            options=CLIAgentOptions(model="sonnet"),
+            project_id="test-project",
+            trace_store=trace_store,
+            store=session_store,
+            executor=mock_executor,
+            detailed=True,
+        )
+
+        yield session, mock_executor, trace_store
+
+        await trace_store.close()
+        await session_store.close()
+        db_path.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_send_message_records_trace(self, session_with_stores) -> None:
+        """Test that send_message records a trace."""
+        session, mock_executor, trace_store = session_with_stores
+
+        # Mock executor to return raw dict events (as CLI outputs)
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello, "}]}}
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "world!"}]}}
+            yield {"type": "result", "result": "Hello, world!", "usage": {"input_tokens": 100, "output_tokens": 50}}
+
+        mock_executor.execute = mock_execute
+
+        # Send message and collect responses
+        responses = []
+        async for msg in session.send_message("Say hello"):
+            responses.append(msg)
+
+        assert len(responses) >= 1
+        assert session.last_trace is not None
+        assert session.last_trace.prompt == "Say hello"
+        assert session.last_trace.status == TraceStatus.SUCCESS
+        assert session.trace_count == 1
+
+    @pytest.mark.asyncio
+    async def test_send_message_records_thinking(self, session_with_stores) -> None:
+        """Test that send_message records thinking content."""
+        session, mock_executor, trace_store = session_with_stores
+
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "thinking", "thinking": "Let me think..."}
+            ]}}
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Answer"}
+            ]}}
+            yield {"type": "result", "result": "Answer", "usage": {}}
+
+        mock_executor.execute = mock_execute
+
+        responses = []
+        async for msg in session.send_message("Think about this"):
+            responses.append(msg)
+
+        trace = session.last_trace
+        assert trace is not None
+        assert trace.status == TraceStatus.SUCCESS
+
+    @pytest.mark.asyncio
+    async def test_send_message_records_tool_calls(self, session_with_stores) -> None:
+        """Test that send_message records tool calls."""
+        session, mock_executor, trace_store = session_with_stores
+
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Read", "input": {"file": "test.py"}, "id": "tool-1"}
+            ]}}
+            yield {"type": "tool_result", "tool_use_id": "tool-1", "content": "file contents here"}
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "I read the file"}
+            ]}}
+            yield {"type": "result", "result": "", "usage": {}}
+
+        mock_executor.execute = mock_execute
+
+        responses = []
+        async for msg in session.send_message("Read a file"):
+            responses.append(msg)
+
+        trace = session.last_trace
+        assert trace is not None
+        assert trace.status == TraceStatus.SUCCESS
+
+    @pytest.mark.asyncio
+    async def test_send_message_detailed_captures_stream(self, session_with_stores) -> None:
+        """Test that detailed mode captures message stream."""
+        session, mock_executor, trace_store = session_with_stores
+
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "Response"}]}}
+            yield {"type": "result", "result": "Response", "usage": {}}
+
+        mock_executor.execute = mock_execute
+
+        async for _ in session.send_message("Test", detailed=True):
+            pass
+
+        trace = session.last_trace
+        assert trace is not None
+        assert trace.message_stream is not None
+        assert len(trace.message_stream) >= 1
+
+    @pytest.mark.asyncio
+    async def test_send_message_not_detailed_no_stream(self, session_with_stores) -> None:
+        """Test that non-detailed mode doesn't capture stream."""
+        session, mock_executor, trace_store = session_with_stores
+        session._detailed = False  # Override to not capture detail
+
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "Response"}]}}
+            yield {"type": "result", "result": "Response", "usage": {}}
+
+        mock_executor.execute = mock_execute
+
+        async for _ in session.send_message("Test", detailed=False):
+            pass
+
+        trace = session.last_trace
+        assert trace is not None
+        assert trace.message_stream is None
+
+    @pytest.mark.asyncio
+    async def test_send_message_on_closed_session_fails(self, session_with_stores) -> None:
+        """Test that sending to closed session raises error."""
+        session, _, _ = session_with_stores
+        session._is_closed = True
+
+        with pytest.raises(RuntimeError, match="closed session"):
+            async for _ in session.send_message("Test"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_multiple_messages_increment_sequence(self, session_with_stores) -> None:
+        """Test that multiple messages increment sequence number."""
+        session, mock_executor, trace_store = session_with_stores
+
+        async def mock_execute(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "Response"}]}}
+            yield {"type": "result", "result": "Response", "usage": {}}
+
+        mock_executor.execute = mock_execute
+
+        # First message
+        async for _ in session.send_message("First"):
+            pass
+        assert session.last_trace.sequence_number == 0
+        assert session.trace_count == 1
+
+        # Second message
+        async for _ in session.send_message("Second"):
+            pass
+        assert session.last_trace.sequence_number == 1
+        assert session.trace_count == 2

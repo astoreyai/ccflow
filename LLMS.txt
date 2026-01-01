@@ -2,7 +2,7 @@
 
 > Claude Code CLI Middleware - Production Python SDK for Claude Code CLI
 
-ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling subscription-based usage with TOON token optimization.
+ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling subscription-based usage (Pro/Max) with TOON token optimization (30-60% savings).
 
 ## Quick Facts
 
@@ -11,14 +11,18 @@ ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling sub
 - **License**: MIT
 - **Auth**: Uses Claude subscription via CLI OAuth (no API keys needed)
 - **Async**: Fully async/await throughout
+- **Tests**: 855+ tests, 85% coverage
+- **Modules**: 30 source files, 12K LOC
 
 ## Installation
 
 ```bash
-pip install ccflow
+pip install ccflow                    # Basic
+pip install "ccflow[toon]"           # With TOON encoding
+pip install "ccflow[all]"            # All extras
 ```
 
-## Core Usage
+## Core API
 
 ### Simple Query
 ```python
@@ -28,110 +32,286 @@ response = await query_simple("What is 2+2?")
 
 ### Streaming Query
 ```python
-from ccflow import query, CLIAgentOptions
+from ccflow import query, CLIAgentOptions, TextMessage
 
 async for msg in query("Explain AI", CLIAgentOptions(model="sonnet")):
-    if hasattr(msg, 'content'):
+    if isinstance(msg, TextMessage):
         print(msg.content, end="")
 ```
 
 ### Multi-turn Session
 ```python
-from ccflow import Session
+from ccflow import Session, CLIAgentOptions
 
-session = Session()
+session = Session(options=CLIAgentOptions(model="opus"))
 async for msg in session.send_message("Hello!"):
-    print(msg)
+    print(msg.content, end="")
 async for msg in session.send_message("What did I say?"):
-    print(msg)  # Claude remembers
-await session.close()
+    print(msg.content, end="")  # Claude remembers
+stats = await session.close()
+print(f"Total tokens: {stats.total_tokens}")
 ```
 
 ### Batch Processing
 ```python
-from ccflow import batch_query
-results = await batch_query(["Q1", "Q2", "Q3"], concurrency=3)
+from ccflow import batch_query, CLIAgentOptions
+results = await batch_query(["Q1", "Q2", "Q3"], CLIAgentOptions(), concurrency=3)
+```
+
+### Extended Thinking (Ultrathink)
+```python
+from ccflow import query, CLIAgentOptions, ThinkingMessage, TextMessage
+
+options = CLIAgentOptions(model="sonnet", ultrathink=True)
+async for msg in query("Analyze this complex algorithm", options):
+    if isinstance(msg, ThinkingMessage):
+        print(f"[Thinking: {msg.thinking_tokens} tokens]")
+    elif isinstance(msg, TextMessage):
+        print(msg.content, end="")
+```
+
+### Project & Trace Recording
+```python
+from ccflow import Project, CLIAgentOptions
+from ccflow.stores import SQLiteProjectStore, SQLiteTraceStore, SQLiteSessionStore
+
+# Initialize stores
+db_path = "ccflow.db"
+project = Project(
+    name="Code Review",
+    store=SQLiteProjectStore(db_path),
+    trace_store=SQLiteTraceStore(db_path),
+    session_store=SQLiteSessionStore(db_path),
+)
+await project.save()
+
+# Create traced session
+session = project.create_session(
+    options=CLIAgentOptions(model="sonnet", ultrathink=True),
+    detailed=True,  # Capture message-level stream
+)
+
+async for msg in session.send_message("Analyze this function"):
+    print(msg.content, end="")
+
+# Access trace
+trace = session.last_trace
+print(f"Thinking tokens: {trace.thinking_tokens}")
+print(f"Tool calls: {len(trace.tool_calls)}")
+
+# Replay with different model
+new_session = await project.replay_as_new(
+    trace.trace_id,
+    options_override=CLIAgentOptions(model="opus"),
+)
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│  Application Layer                       │
-│  query() batch_query() Session          │
-├─────────────────────────────────────────┤
-│  Middleware Layer                        │
-│  SessionManager, Parser, Events         │
-├─────────────────────────────────────────┤
-│  Executor Layer                          │
-│  CLIExecutor, Rate Limiting, Circuit    │
-│  Breaker, Retry, Health Check           │
-├─────────────────────────────────────────┤
-│  Persistence Layer                       │
-│  SQLiteSessionStore, MemorySessionStore │
-├─────────────────────────────────────────┤
-│  Infrastructure                          │
-│  Claude CLI (subprocess)                │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Application Layer                         │
+│  query() batch_query() Session Project TracingSession       │
+├─────────────────────────────────────────────────────────────┤
+│                    Middleware Layer                          │
+│  SessionManager, StreamParser, EventEmitter, CostTracker    │
+├─────────────────────────────────────────────────────────────┤
+│                    Reliability Layer                         │
+│  CircuitBreaker, RateLimiter, RetryHandler, HealthChecker   │
+├─────────────────────────────────────────────────────────────┤
+│                    Persistence Layer                         │
+│  SQLiteSessionStore, SQLiteTraceStore, SQLiteProjectStore   │
+├─────────────────────────────────────────────────────────────┤
+│                    Execution Layer                           │
+│  CLIExecutor, ProcessPool, StreamingPool                    │
+├─────────────────────────────────────────────────────────────┤
+│                    Infrastructure                            │
+│  Claude CLI (subprocess with NDJSON streaming)              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Key Modules
+## Module Map
 
-| Module | Purpose |
-|--------|---------|
-| `api.py` | High-level query functions |
-| `session.py` | Multi-turn conversation |
-| `manager.py` | Session lifecycle |
-| `executor.py` | CLI subprocess management |
-| `parser.py` | NDJSON stream parsing |
-| `reliability.py` | Circuit breaker, retry |
-| `rate_limiting.py` | Token bucket, sliding window |
-| `pricing.py` | Cost calculation |
-| `pool.py` | Concurrent execution |
-| `api_client.py` | API fallback (optional) |
+### Core API (src/ccflow/)
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `api.py` | High-level query functions | `query()`, `batch_query()`, `query_simple()` |
+| `session.py` | Multi-turn conversations | `Session`, `load_session()`, `resume_session()` |
+| `manager.py` | Session lifecycle | `SessionManager`, `get_manager()` |
+| `executor.py` | CLI subprocess handling | `CLIExecutor`, `get_executor()` |
+| `parser.py` | NDJSON stream parsing | `StreamParser`, `collect_text()`, `collect_thinking()` |
+
+### Types & Configuration
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `types.py` | Type definitions (50+) | `CLIAgentOptions`, `Message`, `TraceData`, `ProjectData` |
+| `config.py` | Environment settings | `CCFlowSettings`, `get_settings()` |
+| `exceptions.py` | Error hierarchy (11) | `CCFlowError`, `CLITimeoutError`, `SessionNotFoundError` |
+
+### Reliability & Limits
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `reliability.py` | Fault tolerance | `CircuitBreaker`, `retry_with_backoff()`, `HealthChecker` |
+| `rate_limiting.py` | Rate/concurrency control | `TokenBucketRateLimiter`, `CombinedLimiter` |
+| `pool.py` | Concurrent execution | `ProcessPool`, `StreamingPool` |
+
+### Project & Tracing
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `project.py` | Hierarchical organization | `Project` |
+| `tracing.py` | Auto trace recording | `TracingSession`, `create_tracing_session()` |
+| `trace_store.py` | Trace/project protocols | `TraceStore`, `ProjectStore` |
+
+### Storage (src/ccflow/stores/)
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `sqlite.py` | SQLite session storage | `SQLiteSessionStore` |
+| `traces.py` | SQLite trace/project storage | `SQLiteTraceStore`, `SQLiteProjectStore` |
+| `memory.py` | In-memory storage | `MemorySessionStore` |
+
+### Observability
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `events.py` | Event pub/sub (15 types) | `EventEmitter`, `EventType`, `CostTracker` |
+| `pricing.py` | Cost calculation | `calculate_cost()`, `ModelPricing`, `UsageStats` |
+| `metrics.py` | Prometheus metrics | `record_request()`, `metric_timer()` |
+| `metrics_handlers.py` | Event→Prometheus bridge | `PrometheusEventHandler` |
+
+### Features
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `toon_integration.py` | Token optimization | `ToonSerializer` |
+| `permissions.py` | CLI permission mapping | `PermissionTranslator` |
+| `mcp.py` | MCP server config | `MCPConfigManager` |
+| `api_client.py` | API fallback (optional) | `APIClient`, `FallbackExecutor` |
+
+### CLI & Server
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `cli.py` | Command-line interface | `main()` |
+| `server.py` | FastAPI HTTP/WebSocket | `create_app()` |
 
 ## Configuration
 
-### CLIAgentOptions (main config)
+### CLIAgentOptions (40+ fields)
 ```python
 CLIAgentOptions(
-    model="sonnet",           # haiku, sonnet, opus
-    timeout=300.0,            # seconds
-    max_tokens=4096,          # output limit
-    system_prompt="...",      # custom system prompt
+    # Model
+    model="sonnet",              # haiku, sonnet, opus
+    fallback_model="haiku",      # On overload
+
+    # System prompt
+    system_prompt=None,          # Replace system prompt
+    append_system_prompt=None,   # Append to system prompt
+
+    # Permissions
     permission_mode=PermissionMode.DEFAULT,
-    context={"key": "value"}, # injected context
+    allowed_tools=["Read", "Edit"],
+    disallowed_tools=["Bash(rm:*)"],
+
+    # Session
+    session_id=None,             # Specific session UUID
+    resume=False,                # Resume previous session
+
+    # Limits
+    max_turns=10,
+    timeout=300.0,
+
+    # Extended thinking
+    ultrathink=False,            # Enable deep reasoning
+
+    # Context
+    context={"data": "value"},   # Auto-TOON encoded
+    toon=ToonConfig(enabled=True),
+
+    # MCP
+    mcp_servers={"github": MCPServerConfig(...)},
 )
 ```
 
 ### Environment Variables
-- `CCFLOW_DEFAULT_MODEL` - Default model (sonnet)
-- `CCFLOW_DEFAULT_TIMEOUT` - Timeout in seconds (300)
-- `CCFLOW_LOG_LEVEL` - Logging level (INFO)
-- `CCFLOW_SESSION_STORAGE_PATH` - SQLite path
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CCFLOW_DEFAULT_MODEL` | Default model | `sonnet` |
+| `CCFLOW_DEFAULT_TIMEOUT` | Timeout (seconds) | `300` |
+| `CCFLOW_TOON_ENABLED` | Enable TOON encoding | `true` |
+| `CCFLOW_LOG_LEVEL` | Logging level | `INFO` |
+| `CCFLOW_ENABLE_METRICS` | Enable Prometheus | `true` |
 
-## Message Types
+## Message Types (11)
 
-Union type for all messages:
 ```python
-Message = InitMessage | TextMessage | ToolUseMessage | ToolResultMessage |
-          StopMessage | AssistantMessage | ResultMessage | ...
+Message = (
+    InitMessage |           # Session initialization
+    TextMessage |           # Text content from Claude
+    ThinkingMessage |       # Extended thinking content
+    ToolUseMessage |        # Tool invocation
+    ToolResultMessage |     # Tool execution result
+    ErrorMessage |          # Error from CLI
+    StopMessage |           # Turn completion with usage
+    HookMessage |           # Hook execution result
+    AssistantMessage |      # Full assistant response
+    UserMessage |           # User message echo
+    ResultMessage |         # Final result
+    UnknownMessage          # Forward-compatible fallback
+)
 ```
 
-Common patterns:
+### Common Pattern
 ```python
-async for msg in query("prompt"):
+async for msg in query("prompt", options):
     if isinstance(msg, TextMessage):
-        print(msg.content)
+        print(msg.content, end="")
+    elif isinstance(msg, ThinkingMessage):
+        print(f"[Thinking: {msg.thinking_tokens} tokens]")
     elif isinstance(msg, ToolUseMessage):
-        print(f"Tool: {msg.tool}")
+        print(f"Tool: {msg.tool}({msg.args})")
+    elif isinstance(msg, StopMessage):
+        print(f"\nTokens: {msg.usage}")
+```
+
+## Data Types
+
+### TraceData
+```python
+@dataclass
+class TraceData:
+    trace_id: str
+    session_id: str
+    project_id: str | None
+    sequence_number: int
+    prompt: str
+    response: str
+    thinking: str
+    tool_calls: list[dict]
+    message_stream: list[dict] | None  # When detailed=True
+    input_tokens: int
+    output_tokens: int
+    thinking_tokens: int
+    cost_usd: float
+    duration_ms: int
+    status: TraceStatus  # pending, success, error, cancelled
+```
+
+### ProjectData
+```python
+@dataclass
+class ProjectData:
+    project_id: str
+    name: str
+    description: str
+    parent_project_id: str | None  # For nesting
+    metadata: dict
+    created_at: str
+    updated_at: str
 ```
 
 ## Reliability Features
 
 ### Rate Limiting
 ```python
-from ccflow import get_limiter, CombinedLimiter
+from ccflow import CombinedLimiter
+
 limiter = CombinedLimiter(rate=10.0, max_concurrent=5)
 async with limiter.acquire():
     # rate-limited operation
@@ -139,28 +319,40 @@ async with limiter.acquire():
 
 ### Circuit Breaker
 ```python
-from ccflow import get_cli_circuit_breaker
-breaker = get_cli_circuit_breaker()
-# Auto-opens after 5 failures, resets after 30s
+from ccflow import CircuitBreaker, CircuitBreakerConfig
+
+breaker = CircuitBreaker(CircuitBreakerConfig(
+    failure_threshold=5,
+    recovery_timeout=30.0,
+))
+async with breaker.call():
+    # protected operation
 ```
 
 ### Retry with Backoff
 ```python
 from ccflow import retry_with_backoff, RetryConfig
-result = await retry_with_backoff(async_func, RetryConfig(max_retries=3))
+
+result = await retry_with_backoff(
+    async_func,
+    RetryConfig(max_retries=3, base_delay=1.0, exponential=True),
+)
 ```
 
 ## Cost Tracking
 
 ```python
-from ccflow import calculate_cost, get_usage_tracker
+from ccflow import calculate_cost, get_usage_tracker, ModelTier
 
+# Single calculation
 cost = calculate_cost("sonnet", input_tokens=1000, output_tokens=500)
-# $0.0105
+# Returns: $0.0105
 
+# Cumulative tracking
 tracker = get_usage_tracker()
-tracker.add("sonnet", 1000, 500)
-print(tracker.total_cost_usd)
+tracker.add("sonnet", input_tokens=1000, output_tokens=500)
+print(f"Total: ${tracker.total_cost_usd:.4f}")
+print(f"By model: {tracker.by_model}")
 ```
 
 ## Events
@@ -169,32 +361,124 @@ print(tracker.total_cost_usd)
 from ccflow import get_emitter, EventType
 
 emitter = get_emitter()
-emitter.on(EventType.TOKENS_USED, lambda e: print(f"Tokens: {e.total_tokens}"))
+
+@emitter.on(EventType.TURN_COMPLETED)
+async def on_turn(event):
+    print(f"Turn completed: {event.input_tokens} in, {event.output_tokens} out")
+
+@emitter.on(EventType.THINKING_RECEIVED)
+async def on_thinking(event):
+    print(f"Thinking: {event.thinking_tokens} tokens")
 ```
 
 ## Storage
 
 ```python
 from ccflow import SQLiteSessionStore, MemorySessionStore
+from ccflow.stores import SQLiteTraceStore, SQLiteProjectStore
 
-# Persistent
-store = SQLiteSessionStore("sessions.db")
+# Session storage
+session_store = SQLiteSessionStore("sessions.db")
+
+# Trace storage
+trace_store = SQLiteTraceStore("sessions.db")
+
+# Project storage
+project_store = SQLiteProjectStore("sessions.db")
 
 # In-memory (testing)
-store = MemorySessionStore()
+memory_store = MemorySessionStore()
 ```
 
 ## Exceptions
 
 ```
 CCFlowError (base)
-├── CLINotFoundError
-├── CLITimeoutError
-├── SessionNotFoundError
-├── CircuitBreakerError
-├── RateLimitExceededError
-└── APIClientError
-    └── APIRateLimitError
+├── CLINotFoundError         # Claude CLI not installed
+├── CLIAuthenticationError   # OAuth not configured
+├── CLIExecutionError        # CLI subprocess failed
+├── CLITimeoutError          # Operation timed out
+├── SessionNotFoundError     # Session doesn't exist
+├── ParseError               # NDJSON parsing failed
+├── ToonEncodingError        # TOON serialization failed
+├── PermissionDeniedError    # Tool permission denied
+├── MCPConfigError           # MCP config invalid
+├── SessionStoreError        # Storage operation failed
+├── CircuitBreakerError      # Circuit is open
+├── RateLimitExceededError   # Rate limit hit
+└── ConcurrencyLimitExceededError  # Max concurrent reached
+```
+
+## CLI Usage
+
+```bash
+# Basic query
+ccflow "Explain this code"
+
+# With model selection
+ccflow -m opus "Review for security"
+
+# Streaming mode
+ccflow --stream "Analyze the codebase"
+
+# Session management
+ccflow sessions --list
+ccflow sessions --resume <session-id>
+
+# Start HTTP server
+ccflow server --port 8080
+```
+
+## File Structure
+
+```
+src/ccflow/
+├── __init__.py           # 172 public exports
+├── api.py                # query(), batch_query()
+├── session.py            # Session class (562 LOC)
+├── manager.py            # SessionManager (565 LOC)
+├── executor.py           # CLIExecutor (592 LOC)
+├── parser.py             # StreamParser, helpers
+├── types.py              # 50+ dataclasses/enums (615 LOC)
+├── config.py             # CCFlowSettings
+├── exceptions.py         # 11 exception classes
+├── events.py             # EventEmitter, 15 event types (588 LOC)
+├── reliability.py        # CircuitBreaker, retry (766 LOC)
+├── rate_limiting.py      # Limiters (744 LOC)
+├── pool.py               # ProcessPool (772 LOC)
+├── pricing.py            # Cost calculation (414 LOC)
+├── project.py            # Project class (460 LOC)
+├── tracing.py            # TracingSession
+├── trace_store.py        # Store protocols (399 LOC)
+├── toon_integration.py   # ToonSerializer
+├── permissions.py        # PermissionTranslator
+├── mcp.py                # MCPConfigManager
+├── api_client.py         # APIClient, FallbackExecutor (624 LOC)
+├── metrics.py            # Prometheus metrics
+├── metrics_handlers.py   # Event→Prometheus (392 LOC)
+├── cli.py                # CLI entry point (611 LOC)
+├── server.py             # FastAPI server (741 LOC)
+└── stores/
+    ├── __init__.py       # Store exports
+    ├── sqlite.py         # SQLiteSessionStore
+    ├── traces.py         # SQLiteTraceStore, SQLiteProjectStore
+    └── memory.py         # MemorySessionStore
+```
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# With coverage
+pytest tests/ --cov=ccflow --cov-report=term-missing
+
+# Specific module
+pytest tests/test_tracing.py -v
+
+# Skip slow/integration tests
+pytest tests/ -m "not slow and not integration"
 ```
 
 ## Docker
@@ -205,43 +489,16 @@ docker build -t ccflow .
 
 # Run (mount Claude credentials)
 docker run -v ~/.claude:/home/ccflow/.claude ccflow
-```
 
-## Files Structure
-
-```
-src/ccflow/
-├── __init__.py      # 307 exports
-├── api.py           # query(), batch_query()
-├── session.py       # Session class
-├── manager.py       # SessionManager
-├── executor.py      # CLIExecutor
-├── parser.py        # StreamParser
-├── types.py         # CLIAgentOptions, Message types
-├── exceptions.py    # Exception hierarchy
-├── events.py        # EventEmitter, event types
-├── reliability.py   # CircuitBreaker, retry
-├── rate_limiting.py # TokenBucket, SlidingWindow
-├── pricing.py       # ModelPricing, cost calc
-├── pool.py          # ProcessPool, StreamingPool
-├── api_client.py    # APIClient (fallback)
-├── store.py         # SessionStore protocol
-├── stores/
-│   ├── sqlite.py    # SQLiteSessionStore
-│   └── memory.py    # MemorySessionStore
-├── config.py        # CCFlowSettings
-└── metrics_handlers.py  # Prometheus integration
-```
-
-## Testing
-
-```bash
-pytest tests/ -v --cov=src/ccflow
-# 807+ tests, 80%+ coverage
+# Docker Compose (with Prometheus/Grafana)
+docker compose up
 ```
 
 ## Links
 
-- Docs: docs/api.md
-- Source: src/ccflow/
-- Tests: tests/
+- **API Docs**: docs/api.md
+- **Architecture**: docs/architecture.md
+- **TOON Spec**: docs/TOON_RESEARCH.md
+- **Changelog**: CHANGELOG.md
+- **Source**: src/ccflow/
+- **Tests**: tests/

@@ -1,6 +1,5 @@
 """Tests for permission translator."""
 
-import pytest
 
 from ccflow.permissions import (
     PermissionTranslator,
