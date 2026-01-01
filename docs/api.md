@@ -9,6 +9,7 @@ Complete API documentation for ccflow - Claude Code CLI Middleware.
 - [Session Manager](#session-manager)
 - [Configuration](#configuration)
 - [Message Types](#message-types)
+- [Parser Helpers](#parser-helpers)
 - [Storage & Persistence](#storage--persistence)
 - [Events & Observability](#events--observability)
 - [Rate Limiting](#rate-limiting)
@@ -414,6 +415,9 @@ class CLIAgentOptions:
 
     # Beta features
     betas: list[str] | None = None
+
+    # Extended thinking
+    ultrathink: bool = False  # Enable deep reasoning mode
 ```
 
 ### `PermissionMode`
@@ -469,6 +473,7 @@ class MCPServerConfig:
 Message = (
     InitMessage |
     TextMessage |
+    ThinkingMessage |
     ToolUseMessage |
     ToolResultMessage |
     ErrorMessage |
@@ -495,6 +500,13 @@ class InitMessage:
 class TextMessage:
     content: str
     type: Literal["message"] = "message"
+
+@dataclass
+class ThinkingMessage:
+    """Extended thinking content from ultrathink mode."""
+    content: str
+    thinking_tokens: int = 0
+    type: Literal["thinking"] = "thinking"
 
 @dataclass
 class ToolUseMessage:
@@ -536,6 +548,82 @@ class ResultMessage:
     total_cost_usd: float
     usage: dict[str, Any]
     is_error: bool = False
+```
+
+---
+
+## Parser Helpers
+
+### `collect_text()`
+
+Collect all text content from messages.
+
+```python
+def collect_text(messages: list[Message]) -> str
+```
+
+**Example:**
+```python
+from ccflow import collect_text
+
+messages = [...]  # from query()
+full_text = collect_text(messages)
+```
+
+---
+
+### `collect_thinking()`
+
+Collect all thinking content from messages (ultrathink mode).
+
+```python
+def collect_thinking(messages: list[Message]) -> str
+```
+
+**Example:**
+```python
+from ccflow import collect_thinking, ThinkingMessage
+
+messages = [...]  # from query() with ultrathink=True
+thinking = collect_thinking(messages)
+print(f"Model reasoning: {thinking}")
+```
+
+---
+
+### `extract_thinking_from_assistant()`
+
+Extract thinking content from AssistantMessage content blocks.
+
+```python
+def extract_thinking_from_assistant(msg: AssistantMessage) -> str
+```
+
+**Example:**
+```python
+from ccflow import extract_thinking_from_assistant, AssistantMessage
+
+# When AssistantMessage has thinking blocks embedded
+thinking = extract_thinking_from_assistant(assistant_msg)
+```
+
+---
+
+### `extract_thinking_tokens()`
+
+Extract total thinking token count from raw events.
+
+```python
+def extract_thinking_tokens(events: list[dict[str, Any]]) -> int
+```
+
+**Example:**
+```python
+from ccflow import extract_thinking_tokens
+
+events = [...]  # raw NDJSON events
+total_thinking = extract_thinking_tokens(events)
+print(f"Thinking tokens used: {total_thinking}")
 ```
 
 ---
@@ -632,6 +720,7 @@ class EventType(str, Enum):
     SESSION_ERROR = "session.error"
     TURN_STARTED = "turn.started"
     TURN_COMPLETED = "turn.completed"
+    THINKING_RECEIVED = "thinking.received"
     TOOL_CALLED = "tool.called"
     TOOL_RESULT = "tool.result"
     TOKENS_USED = "tokens.used"
@@ -656,12 +745,20 @@ class TurnCompletedEvent(SessionEvent):
     turn_number: int
     input_tokens: int
     output_tokens: int
+    thinking_tokens: int = 0  # Extended thinking tokens
     duration_ms: int
+
+@dataclass
+class ThinkingReceivedEvent(Event):
+    """Emitted when extended thinking content is received."""
+    content: str
+    thinking_tokens: int = 0
 
 @dataclass
 class TokensUsedEvent(Event):
     input_tokens: int
     output_tokens: int
+    thinking_tokens: int = 0  # Extended thinking tokens
     model: str
 
 @dataclass
@@ -670,6 +767,7 @@ class CostIncurredEvent(Event):
     model: str
     input_tokens: int
     output_tokens: int
+    thinking_tokens: int = 0  # Extended thinking tokens
 ```
 
 **Example:**

@@ -12,6 +12,7 @@ Production middleware bridging Claude Code CLI with SDK-like Python interfaces.
 - **Streaming Support** - Real-time async iteration over CLI NDJSON output
 - **Session Management** - Multi-turn conversations via CLI `--resume`
 - **Batch Processing** - Concurrent query execution with configurable parallelism
+- **Extended Thinking** - Ultrathink mode for deeper reasoning with thinking token tracking
 - **MCP Support** - Programmatic MCP server configuration
 - **Observability** - Prometheus metrics, structured logging
 
@@ -120,6 +121,25 @@ for result in results:
     print(f"{result.session_id}: {result.result[:100]}...")
 ```
 
+### Extended Thinking (Ultrathink)
+
+```python
+from ccflow import query, CLIAgentOptions, ThinkingMessage, TextMessage
+
+# Enable extended thinking for complex reasoning tasks
+options = CLIAgentOptions(
+    model="sonnet",
+    ultrathink=True,  # Enables deep reasoning mode
+)
+
+async for msg in query("Analyze this complex algorithm and find edge cases", options):
+    if isinstance(msg, ThinkingMessage):
+        print(f"[Thinking] {msg.content[:100]}...")
+        print(f"  Thinking tokens: {msg.thinking_tokens}")
+    elif isinstance(msg, TextMessage):
+        print(msg.content, end="")
+```
+
 ## Architecture
 
 ```
@@ -180,6 +200,9 @@ CLIAgentOptions(
     # Limits
     max_turns=10,
     timeout=300.0,
+
+    # Extended thinking
+    ultrathink=False,            # Enable deep reasoning mode
 
     # TOON
     toon=ToonConfig(enabled=True),

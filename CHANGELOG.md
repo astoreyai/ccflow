@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Extended Thinking (Ultrathink)** - Full support for Claude's extended thinking mode
+  - `ultrathink` option in `CLIAgentOptions` to enable deep reasoning
+  - `ThinkingMessage` type for thinking content blocks
+  - `ThinkingReceivedEvent` for event-driven thinking tracking
+  - `thinking_tokens` field in `TurnCompletedEvent`, `TokensUsedEvent`, `CostIncurredEvent`
+  - Parser helpers: `collect_thinking()`, `extract_thinking_from_assistant()`, `extract_thinking_tokens()`
+  - Auto-prepends "ultrathink" prefix to prompts when enabled
+
 ## [0.1.0] - 2026-01-01
 
 ### Added
