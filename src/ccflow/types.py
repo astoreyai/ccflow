@@ -128,6 +128,19 @@ class CLIAgentOptions:
         context: Structured data to inject (auto-TOON encoded)
         verbose: Enable verbose logging
         include_partial: Include partial streaming events
+        debug: Enable debug mode (True for all, or filter string like "api,hooks")
+        json_schema: JSON Schema for structured output validation
+        input_format: Input format ("text" or "stream-json")
+        dangerously_skip_permissions: Bypass all permission checks (sandboxed only)
+        tools: Built-in tools to enable (empty list disables all)
+        continue_session: Continue most recent conversation
+        no_session_persistence: Don't save session to disk
+        agent: Agent for the session
+        agents: Custom agents JSON object
+        betas: Beta headers for API requests
+        settings: Path to settings JSON or JSON string
+        plugin_dirs: Directories to load plugins from
+        disable_slash_commands: Disable all slash commands
     """
 
     # Model selection
@@ -169,6 +182,41 @@ class CLIAgentOptions:
     # Output options
     verbose: bool = False
     include_partial: bool = False
+
+    # Debug options
+    debug: str | bool | None = None  # True for all, or filter string like "api,hooks"
+
+    # Structured output
+    json_schema: str | dict | None = None  # JSON Schema for output validation
+
+    # Input streaming
+    input_format: Literal["text", "stream-json"] | None = None
+
+    # Permission bypass (for sandboxed environments)
+    dangerously_skip_permissions: bool = False
+
+    # Tool specification
+    tools: list[str] | None = None  # Built-in tools to enable ("" disables all, "default" uses all)
+
+    # Session options
+    continue_session: bool = False  # Continue most recent conversation
+    no_session_persistence: bool = False  # Don't save session to disk
+
+    # Agent configuration
+    agent: str | None = None  # Agent for the session
+    agents: dict | None = None  # Custom agents JSON object
+
+    # Beta features
+    betas: list[str] | None = None  # Beta headers for API requests
+
+    # Settings
+    settings: str | None = None  # Path to settings JSON or JSON string
+
+    # Plugins
+    plugin_dirs: list[str] | None = None  # Directories to load plugins from
+
+    # Slash commands
+    disable_slash_commands: bool = False
 
 
 # Message types matching CLI stream-json output

@@ -136,6 +136,72 @@ class CLIExecutor:
                 # Only use specified MCP servers, ignore other configs
                 flags.append("--strict-mcp-config")
 
+        # Debug mode
+        if options.debug:
+            if isinstance(options.debug, bool):
+                flags.append("--debug")
+            else:
+                flags.extend(["--debug", options.debug])
+
+        # Structured output
+        if options.json_schema:
+            schema_str = (
+                options.json_schema
+                if isinstance(options.json_schema, str)
+                else json.dumps(options.json_schema)
+            )
+            flags.extend(["--json-schema", schema_str])
+
+        # Input format
+        if options.input_format:
+            flags.extend(["--input-format", options.input_format])
+
+        # Permission bypass
+        if options.dangerously_skip_permissions:
+            flags.append("--dangerously-skip-permissions")
+
+        # Tool specification
+        if options.tools is not None:
+            if options.tools:
+                flags.append("--tools")
+                flags.extend(options.tools)
+            else:
+                # Empty list means disable all tools
+                flags.extend(["--tools", ""])
+
+        # Continue most recent session
+        if options.continue_session:
+            flags.append("--continue")
+
+        # Session persistence
+        if options.no_session_persistence:
+            flags.append("--no-session-persistence")
+
+        # Agent configuration
+        if options.agent:
+            flags.extend(["--agent", options.agent])
+
+        if options.agents:
+            flags.extend(["--agents", json.dumps(options.agents)])
+
+        # Beta features
+        if options.betas:
+            flags.append("--betas")
+            flags.extend(options.betas)
+
+        # Settings
+        if options.settings:
+            flags.extend(["--settings", options.settings])
+
+        # Plugin directories
+        if options.plugin_dirs:
+            for plugin_dir in options.plugin_dirs:
+                flags.extend(["--plugin-dir", plugin_dir])
+
+        # Slash commands
+        if options.disable_slash_commands:
+            flags.append("--disable-slash-commands")
+
         return flags
 
     async def execute(

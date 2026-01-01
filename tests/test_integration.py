@@ -310,6 +310,220 @@ class TestOptionsIntegration:
         assert "--output-format" in flags
         assert "stream-json" in flags
 
+    def test_build_flags_with_debug_boolean(self):
+        """Test debug flag with boolean True."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(debug=True)
+
+        flags = executor.build_flags(options)
+
+        assert "--debug" in flags
+        # Should be just the flag, no filter value
+        debug_idx = flags.index("--debug")
+        if debug_idx + 1 < len(flags):
+            # Next item should be another flag or model value, not a filter
+            next_val = flags[debug_idx + 1]
+            # If boolean, there's no filter string after --debug
+            assert next_val.startswith("--") or next_val == "sonnet"
+
+    def test_build_flags_with_debug_filter(self):
+        """Test debug flag with filter string."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(debug="api,hooks")
+
+        flags = executor.build_flags(options)
+
+        assert "--debug" in flags
+        assert "api,hooks" in flags
+
+    def test_build_flags_with_json_schema_string(self):
+        """Test json_schema flag with string."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        schema = '{"type":"object","properties":{"name":{"type":"string"}}}'
+        options = CLIAgentOptions(json_schema=schema)
+
+        flags = executor.build_flags(options)
+
+        assert "--json-schema" in flags
+        assert schema in flags
+
+    def test_build_flags_with_json_schema_dict(self):
+        """Test json_schema flag with dict (auto-serialized)."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        options = CLIAgentOptions(json_schema=schema)
+
+        flags = executor.build_flags(options)
+
+        assert "--json-schema" in flags
+        # Should be JSON serialized
+        import json
+        schema_idx = flags.index("--json-schema")
+        parsed = json.loads(flags[schema_idx + 1])
+        assert parsed["type"] == "object"
+
+    def test_build_flags_with_input_format(self):
+        """Test input_format flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(input_format="stream-json")
+
+        flags = executor.build_flags(options)
+
+        assert "--input-format" in flags
+        assert "stream-json" in flags
+
+    def test_build_flags_with_dangerously_skip_permissions(self):
+        """Test dangerously_skip_permissions flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(dangerously_skip_permissions=True)
+
+        flags = executor.build_flags(options)
+
+        assert "--dangerously-skip-permissions" in flags
+
+    def test_build_flags_with_tools_list(self):
+        """Test tools flag with list of tools."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(tools=["Bash", "Edit", "Read"])
+
+        flags = executor.build_flags(options)
+
+        assert "--tools" in flags
+        assert "Bash" in flags
+        assert "Edit" in flags
+        assert "Read" in flags
+
+    def test_build_flags_with_tools_empty_list(self):
+        """Test tools flag with empty list (disables all tools)."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(tools=[])
+
+        flags = executor.build_flags(options)
+
+        assert "--tools" in flags
+        tools_idx = flags.index("--tools")
+        assert flags[tools_idx + 1] == ""
+
+    def test_build_flags_with_continue_session(self):
+        """Test continue_session flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(continue_session=True)
+
+        flags = executor.build_flags(options)
+
+        assert "--continue" in flags
+
+    def test_build_flags_with_no_session_persistence(self):
+        """Test no_session_persistence flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(no_session_persistence=True)
+
+        flags = executor.build_flags(options)
+
+        assert "--no-session-persistence" in flags
+
+    def test_build_flags_with_agent(self):
+        """Test agent flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(agent="code-reviewer")
+
+        flags = executor.build_flags(options)
+
+        assert "--agent" in flags
+        assert "code-reviewer" in flags
+
+    def test_build_flags_with_agents_json(self):
+        """Test agents flag with custom agents JSON."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        agents_config = {
+            "reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}
+        }
+        options = CLIAgentOptions(agents=agents_config)
+
+        flags = executor.build_flags(options)
+
+        assert "--agents" in flags
+        import json
+        agents_idx = flags.index("--agents")
+        parsed = json.loads(flags[agents_idx + 1])
+        assert "reviewer" in parsed
+        assert parsed["reviewer"]["description"] == "Reviews code"
+
+    def test_build_flags_with_betas(self):
+        """Test betas flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(betas=["computer-use", "token-counting"])
+
+        flags = executor.build_flags(options)
+
+        assert "--betas" in flags
+        assert "computer-use" in flags
+        assert "token-counting" in flags
+
+    def test_build_flags_with_settings(self):
+        """Test settings flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(settings="/path/to/settings.json")
+
+        flags = executor.build_flags(options)
+
+        assert "--settings" in flags
+        assert "/path/to/settings.json" in flags
+
+    def test_build_flags_with_plugin_dirs(self):
+        """Test plugin_dirs flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(plugin_dirs=["/path/to/plugins1", "/path/to/plugins2"])
+
+        flags = executor.build_flags(options)
+
+        assert "--plugin-dir" in flags
+        assert "/path/to/plugins1" in flags
+        assert "/path/to/plugins2" in flags
+
+    def test_build_flags_with_disable_slash_commands(self):
+        """Test disable_slash_commands flag."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(disable_slash_commands=True)
+
+        flags = executor.build_flags(options)
+
+        assert "--disable-slash-commands" in flags
+
+    def test_build_flags_with_all_new_options(self):
+        """Test all new options together."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            debug="api",
+            json_schema={"type": "object"},
+            input_format="text",
+            dangerously_skip_permissions=True,
+            tools=["Read", "Write"],
+            continue_session=False,  # Default
+            no_session_persistence=True,
+            agent="explorer",
+            agents={"test": {"description": "Test agent"}},
+            betas=["beta1"],
+            settings='{"key": "value"}',
+            plugin_dirs=["/plugins"],
+            disable_slash_commands=True,
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--debug" in flags
+        assert "--json-schema" in flags
+        assert "--input-format" in flags
+        assert "--dangerously-skip-permissions" in flags
+        assert "--tools" in flags
+        assert "--no-session-persistence" in flags
+        assert "--agent" in flags
+        assert "--agents" in flags
+        assert "--betas" in flags
+        assert "--settings" in flags
+        assert "--plugin-dir" in flags
+        assert "--disable-slash-commands" in flags
+
 
 class TestEndToEndMocked:
     """End-to-end tests with mocked CLI."""
