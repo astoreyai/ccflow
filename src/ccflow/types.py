@@ -163,6 +163,7 @@ class CLIAgentOptions:
 
     # Execution limits
     max_budget_usd: float | None = None
+    max_tokens: int | None = None  # Max output tokens (API only)
     timeout: float = 300.0
 
     # Working directory

@@ -111,6 +111,20 @@ from ccflow.pricing import (
     reset_usage_tracker,
     track_usage,
 )
+from ccflow.api_client import (
+    APIClient,
+    APIClientConfig,
+    APIClientError,
+    APINotAvailableError,
+    APIRateLimitError,
+    APIResponse,
+    FallbackConfig,
+    FallbackExecutor,
+    get_api_client,
+    get_fallback_executor,
+    reset_api_client,
+    reset_fallback_executor,
+)
 from ccflow.session import Session, load_session, resume_session
 from ccflow.store import (
     BaseSessionStore,
@@ -277,4 +291,17 @@ __all__ = [
     "get_usage_tracker",
     "reset_usage_tracker",
     "track_usage",
+    # API Fallback
+    "APIClient",
+    "APIClientConfig",
+    "APIClientError",
+    "APINotAvailableError",
+    "APIRateLimitError",
+    "APIResponse",
+    "FallbackConfig",
+    "FallbackExecutor",
+    "get_api_client",
+    "get_fallback_executor",
+    "reset_api_client",
+    "reset_fallback_executor",
 ]
