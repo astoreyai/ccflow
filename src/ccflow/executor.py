@@ -2,7 +2,8 @@
 CLI Executor - Low-level subprocess management for claude CLI.
 
 Handles async subprocess spawning, streaming stdout parsing,
-and process lifecycle management with integrated rate limiting.
+and process lifecycle management with integrated rate limiting,
+circuit breaker, and retry logic.
 """
 
 from __future__ import annotations
@@ -22,9 +23,21 @@ from ccflow.exceptions import (
     ParseError,
 )
 from ccflow.mcp import MCPConfigManager
+from ccflow.reliability import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    RetryConfig,
+    RetryExhaustedError,
+    bind_correlation_id,
+    get_cli_circuit_breaker,
+    get_correlation_id,
+    retry_with_backoff,
+    set_correlation_id,
+)
 
 if TYPE_CHECKING:
-    from ccflow.rate_limiting import CombinedLimiter, RetryConfig
+    from ccflow.rate_limiting import CombinedLimiter
     from ccflow.types import CLIAgentOptions
 
 logger = structlog.get_logger(__name__)
@@ -39,6 +52,8 @@ class CLIExecutor:
     - Process lifecycle and timeout management
     - Error detection and propagation
     - Rate limiting and concurrency control
+    - Circuit breaker for fault tolerance
+    - Retry with exponential backoff
 
     Example:
         >>> executor = CLIExecutor()
@@ -49,6 +64,11 @@ class CLIExecutor:
         >>> from ccflow.rate_limiting import CombinedLimiter
         >>> limiter = CombinedLimiter(rate=60, max_concurrent=5)
         >>> executor = CLIExecutor(limiter=limiter)
+
+    With custom circuit breaker:
+        >>> from ccflow.reliability import CircuitBreaker, CircuitBreakerConfig
+        >>> breaker = CircuitBreaker(CircuitBreakerConfig(failure_threshold=3))
+        >>> executor = CLIExecutor(circuit_breaker=breaker)
     """
 
     def __init__(
@@ -56,16 +76,24 @@ class CLIExecutor:
         cli_path: str | None = None,
         limiter: CombinedLimiter | None = None,
         retry_config: RetryConfig | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        circuit_breaker_config: CircuitBreakerConfig | None = None,
         *,
         use_global_limiter: bool = True,
+        use_circuit_breaker: bool = True,
+        use_retry: bool = True,
     ) -> None:
         """Initialize executor.
 
         Args:
             cli_path: Path to claude CLI. Auto-detected if None.
             limiter: Rate/concurrency limiter. Uses global if None and use_global_limiter=True.
-            retry_config: Retry configuration for rate limit errors.
+            retry_config: Retry configuration for transient errors.
+            circuit_breaker: Custom circuit breaker. Uses global if None and use_circuit_breaker=True.
+            circuit_breaker_config: Config for new circuit breaker (if circuit_breaker is None).
             use_global_limiter: If True and no limiter provided, use global limiter.
+            use_circuit_breaker: If True and no breaker provided, use global circuit breaker.
+            use_retry: If True, retry transient failures with exponential backoff.
         """
         self._cli_path = cli_path or self._find_cli()
         self._active_processes: dict[str, asyncio.subprocess.Process] = {}
@@ -74,7 +102,31 @@ class CLIExecutor:
         # Rate limiting
         self._limiter = limiter
         self._use_global_limiter = use_global_limiter
-        self._retry_config = retry_config
+
+        # Retry configuration
+        self._retry_config = retry_config or RetryConfig(
+            max_retries=2,
+            base_delay=1.0,
+            max_delay=10.0,
+            retryable_errors=(
+                ConnectionError,
+                TimeoutError,
+                OSError,
+            ),
+        )
+        self._use_retry = use_retry
+
+        # Circuit breaker
+        if circuit_breaker is not None:
+            self._circuit_breaker = circuit_breaker
+        elif use_circuit_breaker:
+            if circuit_breaker_config:
+                self._circuit_breaker = CircuitBreaker(circuit_breaker_config, name="cli")
+            else:
+                self._circuit_breaker = None  # Will use global
+        else:
+            self._circuit_breaker = None
+        self._use_circuit_breaker = use_circuit_breaker
 
     def _find_cli(self) -> str:
         """Find claude CLI in PATH."""
@@ -96,10 +148,25 @@ class CLIExecutor:
 
         return None
 
+    def _get_circuit_breaker(self) -> CircuitBreaker | None:
+        """Get the active circuit breaker."""
+        if self._circuit_breaker is not None:
+            return self._circuit_breaker
+
+        if self._use_circuit_breaker:
+            return get_cli_circuit_breaker()
+
+        return None
+
     @property
     def limiter(self) -> CombinedLimiter | None:
         """Get the active rate/concurrency limiter."""
         return self._get_limiter()
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker | None:
+        """Get the active circuit breaker."""
+        return self._get_circuit_breaker()
 
     def build_flags(self, options: CLIAgentOptions) -> list[str]:
         """Convert CLIAgentOptions to CLI flags.
@@ -253,6 +320,8 @@ class CLIExecutor:
         cwd: Path | str | None = None,
         *,
         skip_rate_limit: bool = False,
+        skip_circuit_breaker: bool = False,
+        correlation_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """Execute claude CLI and stream NDJSON responses.
 
@@ -262,6 +331,8 @@ class CLIExecutor:
             timeout: Maximum execution time in seconds
             cwd: Working directory for CLI execution
             skip_rate_limit: Skip rate limiting for this execution
+            skip_circuit_breaker: Skip circuit breaker for this execution
+            correlation_id: Request correlation ID (auto-generated if None)
 
         Yields:
             Parsed NDJSON events as dictionaries
@@ -272,19 +343,106 @@ class CLIExecutor:
             ParseError: If NDJSON parsing fails
             RateLimitExceededError: If rate limit exceeded (when wait_timeout set)
             ConcurrencyLimitExceededError: If concurrency limit exceeded
+            CircuitBreakerError: If circuit breaker is open
         """
+        # Set correlation ID for this request
+        cid = set_correlation_id(correlation_id)
+        log = bind_correlation_id()
+
         limiter = None if skip_rate_limit else self._get_limiter()
+        breaker = None if skip_circuit_breaker else self._get_circuit_breaker()
 
-        if limiter:
-            async with limiter.acquire() as wait_time:
-                if wait_time > 0:
-                    logger.debug("rate_limit_waited", wait_time=f"{wait_time:.2f}s")
+        # Wrap execution with circuit breaker if available
+        if breaker:
+            try:
+                async with breaker.call():
+                    if limiter:
+                        async with limiter.acquire() as wait_time:
+                            if wait_time > 0:
+                                log.debug("rate_limit_waited", wait_time=f"{wait_time:.2f}s")
 
-                async for event in self._execute_internal(prompt, flags, timeout, cwd):
-                    yield event
+                            async for event in self._execute_with_retry(
+                                prompt, flags, timeout, cwd, log
+                            ):
+                                yield event
+                    else:
+                        async for event in self._execute_with_retry(
+                            prompt, flags, timeout, cwd, log
+                        ):
+                            yield event
+            except CircuitBreakerError:
+                log.warning("circuit_breaker_rejected")
+                raise
         else:
-            async for event in self._execute_internal(prompt, flags, timeout, cwd):
+            if limiter:
+                async with limiter.acquire() as wait_time:
+                    if wait_time > 0:
+                        log.debug("rate_limit_waited", wait_time=f"{wait_time:.2f}s")
+
+                    async for event in self._execute_with_retry(
+                        prompt, flags, timeout, cwd, log
+                    ):
+                        yield event
+            else:
+                async for event in self._execute_with_retry(
+                    prompt, flags, timeout, cwd, log
+                ):
+                    yield event
+
+    async def _execute_with_retry(
+        self,
+        prompt: str,
+        flags: list[str],
+        timeout: float,
+        cwd: Path | str | None,
+        log: structlog.BoundLogger,
+    ) -> AsyncIterator[dict]:
+        """Execute with retry logic for transient failures.
+
+        Note: Retry only applies to the subprocess spawn, not to streaming.
+        Once streaming starts, we don't retry mid-stream.
+        """
+        if not self._use_retry:
+            async for event in self._execute_internal(prompt, flags, timeout, cwd, log):
                 yield event
+            return
+
+        # For streaming, we can only retry the initial connection
+        # Once we start yielding events, we can't retry
+        last_error: Exception | None = None
+
+        for attempt in range(self._retry_config.max_retries + 1):
+            try:
+                async for event in self._execute_internal(prompt, flags, timeout, cwd, log):
+                    yield event
+                return  # Success, exit retry loop
+            except self._retry_config.retryable_errors as e:
+                last_error = e
+
+                if attempt == self._retry_config.max_retries:
+                    log.warning(
+                        "retry_exhausted",
+                        attempts=attempt + 1,
+                        error=str(e),
+                    )
+                    raise RetryExhaustedError(
+                        f"All {self._retry_config.max_retries + 1} attempts failed",
+                        attempts=attempt + 1,
+                        last_error=e,
+                    ) from e
+
+                from ccflow.reliability import calculate_delay
+                delay = calculate_delay(attempt, self._retry_config)
+
+                log.info(
+                    "retry_attempt",
+                    attempt=attempt + 1,
+                    max_retries=self._retry_config.max_retries,
+                    delay=delay,
+                    error=str(e),
+                )
+
+                await asyncio.sleep(delay)
 
     async def _execute_internal(
         self,
@@ -292,11 +450,13 @@ class CLIExecutor:
         flags: list[str],
         timeout: float,
         cwd: Path | str | None,
+        log: structlog.BoundLogger | None = None,
     ) -> AsyncIterator[dict]:
-        """Internal execution without rate limiting."""
+        """Internal execution without rate limiting or circuit breaker."""
+        log = log or bind_correlation_id()
         cmd = [self._cli_path, "-p", prompt, *flags]
 
-        logger.debug(
+        log.debug(
             "executing_cli",
             command=cmd[:5],  # Log first 5 elements to avoid logging full prompt
             cwd=str(cwd) if cwd else None,

@@ -120,8 +120,23 @@ class TestHealthEndpoints:
 
     def test_readiness_check(self, client, mock_manager):
         """Test readiness check endpoint."""
-        with patch("ccflow.executor.get_executor") as mock_exec:
-            mock_exec.return_value.check_cli_available = AsyncMock(return_value=True)
+        import time
+
+        from ccflow.reliability import HealthStatus
+
+        mock_health = HealthStatus(
+            healthy=True,
+            cli_available=True,
+            cli_executable=True,
+            cli_authenticated=True,
+            latency_ms=50.0,
+            error=None,
+            version="1.0.0",
+            last_check_time=time.time(),
+        )
+
+        with patch("ccflow.server.get_health_checker") as mock_checker:
+            mock_checker.return_value.check = AsyncMock(return_value=mock_health)
 
             response = client.get("/ready")
             assert response.status_code == 200
@@ -129,8 +144,23 @@ class TestHealthEndpoints:
 
     def test_readiness_not_ready(self, client, mock_manager):
         """Test readiness check when not ready."""
-        with patch("ccflow.executor.get_executor") as mock_exec:
-            mock_exec.return_value.check_cli_available = AsyncMock(return_value=False)
+        import time
+
+        from ccflow.reliability import HealthStatus
+
+        mock_health = HealthStatus(
+            healthy=False,
+            cli_available=False,
+            cli_executable=False,
+            cli_authenticated=False,
+            latency_ms=None,
+            error="CLI not found in PATH",
+            version=None,
+            last_check_time=time.time(),
+        )
+
+        with patch("ccflow.server.get_health_checker") as mock_checker:
+            mock_checker.return_value.check = AsyncMock(return_value=mock_health)
 
             response = client.get("/ready")
             assert response.status_code == 503

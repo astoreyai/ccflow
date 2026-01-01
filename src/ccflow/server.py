@@ -28,6 +28,14 @@ from ccflow.rate_limiting import (
     RateLimitExceededError,
     get_limiter,
 )
+from ccflow.reliability import (
+    CircuitBreakerError,
+    HealthChecker,
+    HealthStatus,
+    get_correlation_id,
+    get_health_checker,
+    set_correlation_id,
+)
 from ccflow.types import CLIAgentOptions, Message
 
 if TYPE_CHECKING:
@@ -103,6 +111,20 @@ if FASTAPI_AVAILABLE:
         cli_available: bool
         active_sessions: int
         uptime_seconds: float
+
+    class DeepHealthResponse(BaseModel):
+        """Deep health check response with CLI verification."""
+
+        healthy: bool
+        cli_available: bool
+        cli_executable: bool
+        cli_authenticated: bool
+        cli_version: str | None
+        latency_ms: float | None
+        error: str | None
+        active_sessions: int
+        uptime_seconds: float
+        circuit_breaker_state: str | None
 
     class ErrorResponse(BaseModel):
         """Error response."""
@@ -204,6 +226,26 @@ class CCFlowServer:
             allow_headers=["*"],
         )
 
+        # Add correlation ID middleware
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.requests import Request
+        from starlette.responses import Response
+
+        class CorrelationIDMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next) -> Response:
+                # Get or generate correlation ID
+                correlation_id = request.headers.get("X-Correlation-ID")
+                cid = set_correlation_id(correlation_id)
+
+                # Process request
+                response = await call_next(request)
+
+                # Add correlation ID to response headers
+                response.headers["X-Correlation-ID"] = cid
+                return response
+
+        self._app.add_middleware(CorrelationIDMiddleware)
+
     def _setup_routes(self) -> None:
         """Register API routes."""
         app = self._app
@@ -234,21 +276,52 @@ class CCFlowServer:
         @app.get("/ready", tags=["Health"])
         async def readiness_check() -> dict:
             """Check if server is ready to accept requests."""
-            from ccflow.executor import get_executor
+            health_checker = get_health_checker()
+            health_status = await health_checker.check()
 
-            try:
-                executor = get_executor()
-                cli_ready = await executor.check_cli_available()
-            except CLINotFoundError:
-                cli_ready = False
-
-            if not cli_ready:
+            if not health_status.healthy:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="CLI not available",
+                    detail=health_status.error or "CLI not available",
                 )
 
-            return {"ready": True}
+            return {"ready": True, "correlation_id": get_correlation_id()}
+
+        @app.get("/health/deep", response_model=DeepHealthResponse, tags=["Health"])
+        async def deep_health_check(force: bool = False) -> DeepHealthResponse:
+            """Deep health check that verifies CLI can execute queries.
+
+            Args:
+                force: Bypass cache and perform fresh check
+
+            This endpoint:
+            - Verifies CLI is in PATH
+            - Checks CLI is executable (version check)
+            - Executes a minimal query to verify authentication
+            - Reports circuit breaker state
+            """
+            from ccflow.reliability import get_cli_circuit_breaker
+
+            health_checker = get_health_checker()
+            health_status = await health_checker.check(force=force)
+            uptime = (datetime.now() - self._start_time).total_seconds()
+
+            # Get circuit breaker state
+            breaker = get_cli_circuit_breaker()
+            circuit_state = breaker.state.value if breaker else None
+
+            return DeepHealthResponse(
+                healthy=health_status.healthy,
+                cli_available=health_status.cli_available,
+                cli_executable=health_status.cli_executable,
+                cli_authenticated=health_status.cli_authenticated,
+                cli_version=health_status.version,
+                latency_ms=health_status.latency_ms,
+                error=health_status.error,
+                active_sessions=self._manager.active_session_count if self._manager else 0,
+                uptime_seconds=uptime,
+                circuit_breaker_state=circuit_state,
+            )
 
         # Query endpoints
         @app.post("/query", response_model=QueryResponse, tags=["Query"])
@@ -306,6 +379,12 @@ class CCFlowServer:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=str(e),
+                )
+            except CircuitBreakerError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Service temporarily unavailable: {e}",
+                    headers={"Retry-After": str(int(e.retry_after))} if e.retry_after else None,
                 )
             except CCFlowError as e:
                 raise HTTPException(
@@ -592,6 +671,12 @@ class CCFlowServer:
                 "error": "concurrency_limit_exceeded",
                 "current": e.current,
                 "limit": e.limit,
+            })
+        except CircuitBreakerError as e:
+            await websocket.send_json({
+                "type": "error",
+                "error": "circuit_breaker_open",
+                "retry_after": e.retry_after,
             })
         except Exception as e:
             await websocket.send_json({
