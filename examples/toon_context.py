@@ -69,7 +69,6 @@ async def main():
         model="sonnet",
         context=portfolio_data,  # Auto-TOON encoded
         toon=toon_config,
-        max_turns=5,
     )
 
     async for msg in query(

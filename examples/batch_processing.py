@@ -24,7 +24,6 @@ async def main():
     # Configure options (shared across all prompts)
     options = CLIAgentOptions(
         model="haiku",  # Use faster model for batch
-        max_turns=3,
         allowed_tools=["Read", "Glob"],
     )
 

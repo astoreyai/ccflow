@@ -173,3 +173,17 @@ class MCPConfigError(CCFlowError):
     def __init__(self, message: str, server_name: str | None = None) -> None:
         super().__init__(message)
         self.server_name = server_name
+
+
+class SessionStoreError(CCFlowError):
+    """Session storage operation failed.
+
+    Raised when database operations fail in SessionStore implementations.
+
+    Attributes:
+        operation: The operation that failed (save, load, delete, etc.)
+    """
+
+    def __init__(self, message: str, operation: str | None = None) -> None:
+        super().__init__(message)
+        self.operation = operation

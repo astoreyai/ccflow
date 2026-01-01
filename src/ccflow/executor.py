@@ -2,7 +2,7 @@
 CLI Executor - Low-level subprocess management for claude CLI.
 
 Handles async subprocess spawning, streaming stdout parsing,
-and process lifecycle management.
+and process lifecycle management with integrated rate limiting.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from ccflow.exceptions import (
 from ccflow.mcp import MCPConfigManager
 
 if TYPE_CHECKING:
+    from ccflow.rate_limiting import CombinedLimiter, RetryConfig
     from ccflow.types import CLIAgentOptions
 
 logger = structlog.get_logger(__name__)
@@ -37,22 +38,43 @@ class CLIExecutor:
     - Streaming NDJSON output line-by-line
     - Process lifecycle and timeout management
     - Error detection and propagation
+    - Rate limiting and concurrency control
 
     Example:
         >>> executor = CLIExecutor()
         >>> async for event in executor.execute("Explain this", ["--output-format", "stream-json"]):
         ...     print(event)
+
+    With rate limiting:
+        >>> from ccflow.rate_limiting import CombinedLimiter
+        >>> limiter = CombinedLimiter(rate=60, max_concurrent=5)
+        >>> executor = CLIExecutor(limiter=limiter)
     """
 
-    def __init__(self, cli_path: str | None = None) -> None:
+    def __init__(
+        self,
+        cli_path: str | None = None,
+        limiter: CombinedLimiter | None = None,
+        retry_config: RetryConfig | None = None,
+        *,
+        use_global_limiter: bool = True,
+    ) -> None:
         """Initialize executor.
 
         Args:
             cli_path: Path to claude CLI. Auto-detected if None.
+            limiter: Rate/concurrency limiter. Uses global if None and use_global_limiter=True.
+            retry_config: Retry configuration for rate limit errors.
+            use_global_limiter: If True and no limiter provided, use global limiter.
         """
         self._cli_path = cli_path or self._find_cli()
         self._active_processes: dict[str, asyncio.subprocess.Process] = {}
         self._mcp_manager = MCPConfigManager()
+
+        # Rate limiting
+        self._limiter = limiter
+        self._use_global_limiter = use_global_limiter
+        self._retry_config = retry_config
 
     def _find_cli(self) -> str:
         """Find claude CLI in PATH."""
@@ -62,6 +84,22 @@ class CLIExecutor:
                 "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
             )
         return cli
+
+    def _get_limiter(self) -> CombinedLimiter | None:
+        """Get the active limiter."""
+        if self._limiter is not None:
+            return self._limiter
+
+        if self._use_global_limiter:
+            from ccflow.rate_limiting import get_limiter
+            return get_limiter()
+
+        return None
+
+    @property
+    def limiter(self) -> CombinedLimiter | None:
+        """Get the active rate/concurrency limiter."""
+        return self._get_limiter()
 
     def build_flags(self, options: CLIAgentOptions) -> list[str]:
         """Convert CLIAgentOptions to CLI flags.
@@ -213,6 +251,8 @@ class CLIExecutor:
         flags: list[str],
         timeout: float = 300.0,
         cwd: Path | str | None = None,
+        *,
+        skip_rate_limit: bool = False,
     ) -> AsyncIterator[dict]:
         """Execute claude CLI and stream NDJSON responses.
 
@@ -221,6 +261,7 @@ class CLIExecutor:
             flags: CLI flags (e.g., ["--output-format", "stream-json"])
             timeout: Maximum execution time in seconds
             cwd: Working directory for CLI execution
+            skip_rate_limit: Skip rate limiting for this execution
 
         Yields:
             Parsed NDJSON events as dictionaries
@@ -229,7 +270,30 @@ class CLIExecutor:
             CLIExecutionError: If subprocess fails
             CLITimeoutError: If execution exceeds timeout
             ParseError: If NDJSON parsing fails
+            RateLimitExceededError: If rate limit exceeded (when wait_timeout set)
+            ConcurrencyLimitExceededError: If concurrency limit exceeded
         """
+        limiter = None if skip_rate_limit else self._get_limiter()
+
+        if limiter:
+            async with limiter.acquire() as wait_time:
+                if wait_time > 0:
+                    logger.debug("rate_limit_waited", wait_time=f"{wait_time:.2f}s")
+
+                async for event in self._execute_internal(prompt, flags, timeout, cwd):
+                    yield event
+        else:
+            async for event in self._execute_internal(prompt, flags, timeout, cwd):
+                yield event
+
+    async def _execute_internal(
+        self,
+        prompt: str,
+        flags: list[str],
+        timeout: float,
+        cwd: Path | str | None,
+    ) -> AsyncIterator[dict]:
+        """Internal execution without rate limiting."""
         cmd = [self._cli_path, "-p", prompt, *flags]
 
         logger.debug(

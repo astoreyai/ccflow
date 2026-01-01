@@ -28,7 +28,6 @@ async def main():
         options=CLIAgentOptions(
             model="sonnet",
             permission_mode=PermissionMode.ACCEPT_EDITS,
-            max_turns=10,
         )
     )
 

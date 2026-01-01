@@ -16,7 +16,6 @@ async def main():
     # Configure options
     options = CLIAgentOptions(
         model="sonnet",
-        max_turns=5,
         allowed_tools=["Read", "Grep"],
     )
 

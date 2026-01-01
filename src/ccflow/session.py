@@ -2,19 +2,32 @@
 Session Manager - Stateful multi-turn conversation management.
 
 Maps SDK Session interface to CLI --resume functionality,
-tracking conversation state and usage statistics.
+tracking conversation state and usage statistics with optional persistence.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, AsyncIterator
 
 import structlog
 
+from ccflow.events import (
+    EventEmitter,
+    SessionClosedEvent,
+    SessionCreatedEvent,
+    SessionLoadedEvent,
+    SessionPersistedEvent,
+    SessionResumedEvent,
+    TurnCompletedEvent,
+    TurnStartedEvent,
+    get_emitter,
+)
 from ccflow.executor import CLIExecutor, get_executor
 from ccflow.parser import StreamParser
+from ccflow.store import SessionState, SessionStatus, SessionStore
 from ccflow.toon_integration import ToonSerializer
 from ccflow.types import (
     CLIAgentOptions,
@@ -36,6 +49,7 @@ class Session:
 
     Manages multi-turn conversations via CLI --resume flag,
     tracking usage statistics and supporting session forking.
+    Optionally persists state to a SessionStore.
 
     Example:
         >>> session = Session(options=CLIAgentOptions(model="opus"))
@@ -45,6 +59,12 @@ class Session:
         ...     print(msg.content, end="")
         >>> stats = await session.close()
         >>> print(f"Total tokens: {stats.total_tokens}")
+
+    With persistence:
+        >>> from ccflow import SQLiteSessionStore
+        >>> store = SQLiteSessionStore()
+        >>> session = Session(options=opts, store=store)
+        >>> # State auto-persisted after each turn
     """
 
     def __init__(
@@ -52,6 +72,8 @@ class Session:
         session_id: str | None = None,
         options: CLIAgentOptions | None = None,
         executor: CLIExecutor | None = None,
+        store: SessionStore | None = None,
+        emitter: EventEmitter | None = None,
     ) -> None:
         """Initialize session.
 
@@ -59,24 +81,57 @@ class Session:
             session_id: Specific session UUID (auto-generated if None)
             options: CLI agent options
             executor: CLI executor instance (uses default if None)
+            store: Optional session store for persistence
+            emitter: Optional event emitter (uses global if None)
         """
         self._session_id = session_id or str(uuid.uuid4())
         self._options = options or CLIAgentOptions()
         self._executor = executor or get_executor()
         self._parser = StreamParser()
         self._toon = ToonSerializer(self._options.toon)
+        self._store = store
+        self._emitter = emitter or get_emitter()
 
         # Statistics
         self._turn_count = 0
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+        self._total_cost_usd = 0.0
         self._start_time = time.monotonic()
+        self._created_at = datetime.now()
         self._is_closed = False
+
+        # Track conversation for integrity
+        self._last_prompt = ""
+        self._last_response = ""
+        self._messages_hash = ""
 
         # Track if this is a fresh session or resumed
         self._is_first_message = True
 
+        # Tags for organization
+        self._tags: list[str] = []
+
         logger.info("session_created", session_id=self._session_id)
+
+        # Emit session created event
+        self._emit_sync(
+            SessionCreatedEvent(
+                session_id=self._session_id,
+                model=self._options.model,
+                tags=self._tags.copy(),
+            )
+        )
+
+    def _emit_sync(self, event) -> None:
+        """Emit event synchronously."""
+        if self._emitter is not None:
+            self._emitter.emit_sync(event)
+
+    async def _emit(self, event) -> None:
+        """Emit event asynchronously."""
+        if self._emitter is not None:
+            await self._emitter.emit(event)
 
     @property
     def session_id(self) -> str:
@@ -92,6 +147,56 @@ class Session:
     def is_closed(self) -> bool:
         """Check if session is closed."""
         return self._is_closed
+
+    @property
+    def tags(self) -> list[str]:
+        """Get session tags."""
+        return self._tags.copy()
+
+    def add_tag(self, tag: str) -> None:
+        """Add a tag to the session."""
+        if tag not in self._tags:
+            self._tags.append(tag)
+
+    def remove_tag(self, tag: str) -> None:
+        """Remove a tag from the session."""
+        if tag in self._tags:
+            self._tags.remove(tag)
+
+    def to_state(self) -> SessionState:
+        """Convert session to persistable state."""
+        return SessionState(
+            session_id=self._session_id,
+            created_at=self._created_at,
+            updated_at=datetime.now(),
+            status=SessionStatus.CLOSED if self._is_closed else SessionStatus.ACTIVE,
+            model=self._options.model or "sonnet",
+            system_prompt=self._options.system_prompt,
+            append_system_prompt=self._options.append_system_prompt,
+            turn_count=self._turn_count,
+            total_input_tokens=self._total_input_tokens,
+            total_output_tokens=self._total_output_tokens,
+            total_cost_usd=self._total_cost_usd,
+            messages_hash=self._messages_hash,
+            last_prompt=self._last_prompt,
+            last_response=self._last_response,
+            tags=self._tags.copy(),
+            toon_savings_ratio=self._options.toon.last_compression_ratio,
+        )
+
+    async def _persist(self) -> None:
+        """Persist current state to store if configured."""
+        if self._store is not None:
+            try:
+                await self._store.save(self.to_state())
+                logger.debug("session_persisted", session_id=self._session_id)
+                await self._emit(SessionPersistedEvent(session_id=self._session_id))
+            except Exception as e:
+                logger.warning(
+                    "session_persist_failed",
+                    session_id=self._session_id,
+                    error=str(e),
+                )
 
     async def send_message(
         self,
@@ -113,7 +218,21 @@ class Session:
         if self._is_closed:
             raise RuntimeError("Cannot send message on closed session")
 
+        turn_start_time = time.monotonic()
         self._turn_count += 1
+        self._last_prompt = content
+        response_parts: list[str] = []
+        turn_input_tokens = 0
+        turn_output_tokens = 0
+
+        # Emit turn started event
+        await self._emit(
+            TurnStartedEvent(
+                session_id=self._session_id,
+                turn_number=self._turn_count,
+                prompt=content,
+            )
+        )
 
         # Build options for this turn
         turn_options = CLIAgentOptions(
@@ -161,20 +280,56 @@ class Session:
                     self._session_id = msg.session_id
                     logger.debug("session_id_updated", session_id=self._session_id)
 
+            # Collect response text for integrity tracking
+            if isinstance(msg, TextMessage):
+                response_parts.append(msg.content)
+
             # Track usage from stop message
             if isinstance(msg, StopMessage):
-                self._total_input_tokens += msg.usage.get("input_tokens", 0)
-                self._total_output_tokens += msg.usage.get("output_tokens", 0)
+                turn_input_tokens = msg.usage.get("input_tokens", 0)
+                turn_output_tokens = msg.usage.get("output_tokens", 0)
+                self._total_input_tokens += turn_input_tokens
+                self._total_output_tokens += turn_output_tokens
                 logger.debug(
                     "turn_complete",
                     turn=self._turn_count,
-                    input_tokens=msg.usage.get("input_tokens", 0),
-                    output_tokens=msg.usage.get("output_tokens", 0),
+                    input_tokens=turn_input_tokens,
+                    output_tokens=turn_output_tokens,
                 )
 
             yield msg
 
+        # Update conversation tracking
+        self._last_response = "".join(response_parts)
+        self._update_hash()
         self._is_first_message = False
+
+        # Calculate turn duration
+        turn_duration = time.monotonic() - turn_start_time
+
+        # Emit turn completed event
+        await self._emit(
+            TurnCompletedEvent(
+                session_id=self._session_id,
+                turn_number=self._turn_count,
+                prompt=content,
+                response=self._last_response,
+                input_tokens=turn_input_tokens,
+                output_tokens=turn_output_tokens,
+                duration_seconds=turn_duration,
+                metadata={"model": self._options.model},
+            )
+        )
+
+        # Persist state after turn completes
+        await self._persist()
+
+    def _update_hash(self) -> None:
+        """Update messages hash with current turn."""
+        import hashlib
+
+        combined = f"{self._messages_hash}:{self._last_prompt}:{self._last_response}"
+        self._messages_hash = hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     async def fork(self) -> Session:
         """Create new session branched from current state.
@@ -207,6 +362,7 @@ class Session:
             session_id=None,  # Will get new ID from CLI
             options=fork_options,
             executor=self._executor,
+            store=self._store,  # Share store with forked session
         )
 
         logger.info(
@@ -220,6 +376,8 @@ class Session:
     async def close(self) -> SessionStats:
         """Close session and return statistics.
 
+        Persists final state with CLOSED status if store is configured.
+
         Returns:
             SessionStats with usage information
         """
@@ -229,6 +387,9 @@ class Session:
         self._is_closed = True
         duration = time.monotonic() - self._start_time
 
+        # Persist final state with CLOSED status
+        await self._persist()
+
         stats = SessionStats(
             session_id=self._session_id,
             total_turns=self._turn_count,
@@ -236,6 +397,18 @@ class Session:
             total_output_tokens=self._total_output_tokens,
             duration_seconds=duration,
             toon_savings_ratio=self._options.toon.last_compression_ratio,
+        )
+
+        # Emit session closed event
+        await self._emit(
+            SessionClosedEvent(
+                session_id=self._session_id,
+                model=self._options.model,
+                turn_count=self._turn_count,
+                total_tokens=stats.total_tokens,
+                duration_seconds=duration,
+                total_cost_usd=self._total_cost_usd,
+            )
         )
 
         logger.info(
@@ -252,12 +425,16 @@ class Session:
 async def resume_session(
     session_id: str,
     options: CLIAgentOptions | None = None,
+    store: SessionStore | None = None,
+    emitter: EventEmitter | None = None,
 ) -> Session:
     """Resume an existing session by ID.
 
     Args:
         session_id: Session UUID to resume
         options: Optional options override
+        store: Optional session store for persistence
+        emitter: Optional event emitter
 
     Returns:
         Session instance configured to resume
@@ -266,9 +443,98 @@ async def resume_session(
     opts.session_id = session_id
     opts.resume = True
 
-    session = Session(session_id=session_id, options=opts)
+    session = Session(session_id=session_id, options=opts, store=store, emitter=emitter)
     session._is_first_message = False  # Mark as resumed
 
+    # Emit resumed event (override created event)
+    emitter_instance = emitter or get_emitter()
+    emitter_instance.emit_sync(
+        SessionResumedEvent(
+            session_id=session_id,
+            previous_turn_count=0,  # Unknown without store
+        )
+    )
+
     logger.info("session_resumed", session_id=session_id)
+
+    return session
+
+
+async def load_session(
+    session_id: str,
+    store: SessionStore,
+    options: CLIAgentOptions | None = None,
+    emitter: EventEmitter | None = None,
+) -> Session | None:
+    """Load and resume a session from a store.
+
+    Restores session state including statistics and conversation tracking
+    from the persistent store.
+
+    Args:
+        session_id: Session UUID to load
+        store: Session store to load from
+        options: Optional options override (model, prompts, etc.)
+        emitter: Optional event emitter
+
+    Returns:
+        Session instance with restored state, or None if not found
+
+    Example:
+        >>> store = SQLiteSessionStore()
+        >>> session = await load_session("abc-123", store)
+        >>> if session:
+        ...     async for msg in session.send_message("Continue..."):
+        ...         print(msg.content, end="")
+    """
+    state = await store.load(session_id)
+    if state is None:
+        logger.warning("session_not_found", session_id=session_id)
+        return None
+
+    # Build options from stored state or provided override
+    opts = options or CLIAgentOptions()
+    opts.session_id = session_id
+    opts.resume = True
+
+    # Restore model and prompts from state if not overridden
+    if opts.model is None:
+        opts.model = state.model
+    if opts.system_prompt is None:
+        opts.system_prompt = state.system_prompt
+    if opts.append_system_prompt is None:
+        opts.append_system_prompt = state.append_system_prompt
+
+    # Create session with restored state
+    session = Session(session_id=session_id, options=opts, store=store, emitter=emitter)
+
+    # Restore statistics
+    session._turn_count = state.turn_count
+    session._total_input_tokens = state.total_input_tokens
+    session._total_output_tokens = state.total_output_tokens
+    session._total_cost_usd = state.total_cost_usd
+    session._created_at = state.created_at
+    session._messages_hash = state.messages_hash
+    session._last_prompt = state.last_prompt
+    session._last_response = state.last_response
+    session._tags = state.tags.copy()
+    session._is_first_message = False  # Mark as resumed
+
+    # Emit loaded event
+    emitter_instance = emitter or get_emitter()
+    await emitter_instance.emit(
+        SessionLoadedEvent(
+            session_id=session_id,
+            turn_count=state.turn_count,
+            total_tokens=state.total_tokens,
+        )
+    )
+
+    logger.info(
+        "session_loaded",
+        session_id=session_id,
+        turn_count=state.turn_count,
+        total_tokens=state.total_tokens,
+    )
 
     return session

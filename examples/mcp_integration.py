@@ -55,7 +55,6 @@ async def main():
             model="sonnet",
             mcp_servers=servers,
             strict_mcp=False,  # Allow other MCP servers too
-            max_turns=5,
             # MCP tools are auto-allowed via translate_mcp_tools
             allowed_tools=[
                 "mcp__github__get_issue",
