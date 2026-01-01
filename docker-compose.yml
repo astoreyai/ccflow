@@ -1,0 +1,183 @@
+# =============================================================================
+# ccflow Docker Compose
+# =============================================================================
+# Subscription-based Claude Code CLI middleware
+#
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose --profile prod up -d
+#   With metrics: docker compose --profile metrics up
+#
+# Prerequisites:
+#   - Claude CLI authenticated on host: claude login
+#   - Credentials in ~/.claude/
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # ccflow API Server
+  # ---------------------------------------------------------------------------
+  ccflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ccflow:latest
+    container_name: ccflow
+    restart: unless-stopped
+
+    # Mount Claude credentials from host (subscription auth)
+    volumes:
+      - ${HOME}/.claude:/home/ccflow/.claude:ro
+      - ccflow-data:/home/ccflow/data
+      - ccflow-sessions:/home/ccflow/sessions
+
+    # Environment
+    environment:
+      - CCFLOW_LOG_LEVEL=${CCFLOW_LOG_LEVEL:-INFO}
+      - CCFLOW_API_PORT=8080
+      - CCFLOW_METRICS_PORT=9090
+      # Session persistence
+      - CCFLOW_SESSION_DIR=/home/ccflow/sessions
+      # Rate limiting (match subscription tier)
+      - CCFLOW_RATE_LIMIT_REQUESTS=${CCFLOW_RATE_LIMIT_REQUESTS:-45}
+      - CCFLOW_RATE_LIMIT_WINDOW=${CCFLOW_RATE_LIMIT_WINDOW:-18000}
+      # Pool settings
+      - CCFLOW_POOL_WORKERS=${CCFLOW_POOL_WORKERS:-4}
+      - CCFLOW_POOL_QUEUE_SIZE=${CCFLOW_POOL_QUEUE_SIZE:-100}
+
+    ports:
+      - "${CCFLOW_API_PORT:-8080}:8080"
+      - "${CCFLOW_METRICS_PORT:-9090}:9090"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      - ccflow-net
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Development mode (hot reload, debug)
+  # ---------------------------------------------------------------------------
+  ccflow-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ccflow:dev
+    container_name: ccflow-dev
+    profiles:
+      - dev
+
+    volumes:
+      # Mount source for hot reload
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      # Claude credentials
+      - ${HOME}/.claude:/home/ccflow/.claude:ro
+      - ccflow-data:/home/ccflow/data
+
+    environment:
+      - CCFLOW_LOG_LEVEL=DEBUG
+      - CCFLOW_API_PORT=8080
+      - CCFLOW_METRICS_PORT=9090
+      - CCFLOW_DEV_MODE=true
+
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+    command: ["python", "-m", "ccflow.server", "--reload"]
+
+    networks:
+      - ccflow-net
+
+  # ---------------------------------------------------------------------------
+  # Prometheus (metrics collection)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: ccflow-prometheus
+    profiles:
+      - metrics
+      - prod
+
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+
+    networks:
+      - ccflow-net
+
+    depends_on:
+      - ccflow
+
+  # ---------------------------------------------------------------------------
+  # Grafana (dashboards)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: ccflow-grafana
+    profiles:
+      - metrics
+      - prod
+
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-ccflow}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+
+    networks:
+      - ccflow-net
+
+    depends_on:
+      - prometheus
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ccflow-net:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  ccflow-data:
+    driver: local
+  ccflow-sessions:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

@@ -1,0 +1,247 @@
+# ccflow
+
+> Claude Code CLI Middleware - Production Python SDK for Claude Code CLI
+
+ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling subscription-based usage with TOON token optimization.
+
+## Quick Facts
+
+- **Version**: 0.1.0
+- **Python**: 3.11+
+- **License**: MIT
+- **Auth**: Uses Claude subscription via CLI OAuth (no API keys needed)
+- **Async**: Fully async/await throughout
+
+## Installation
+
+```bash
+pip install ccflow
+```
+
+## Core Usage
+
+### Simple Query
+```python
+from ccflow import query_simple
+response = await query_simple("What is 2+2?")
+```
+
+### Streaming Query
+```python
+from ccflow import query, CLIAgentOptions
+
+async for msg in query("Explain AI", CLIAgentOptions(model="sonnet")):
+    if hasattr(msg, 'content'):
+        print(msg.content, end="")
+```
+
+### Multi-turn Session
+```python
+from ccflow import Session
+
+session = Session()
+async for msg in session.send_message("Hello!"):
+    print(msg)
+async for msg in session.send_message("What did I say?"):
+    print(msg)  # Claude remembers
+await session.close()
+```
+
+### Batch Processing
+```python
+from ccflow import batch_query
+results = await batch_query(["Q1", "Q2", "Q3"], concurrency=3)
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  Application Layer                       │
+│  query() batch_query() Session          │
+├─────────────────────────────────────────┤
+│  Middleware Layer                        │
+│  SessionManager, Parser, Events         │
+├─────────────────────────────────────────┤
+│  Executor Layer                          │
+│  CLIExecutor, Rate Limiting, Circuit    │
+│  Breaker, Retry, Health Check           │
+├─────────────────────────────────────────┤
+│  Persistence Layer                       │
+│  SQLiteSessionStore, MemorySessionStore │
+├─────────────────────────────────────────┤
+│  Infrastructure                          │
+│  Claude CLI (subprocess)                │
+└─────────────────────────────────────────┘
+```
+
+## Key Modules
+
+| Module | Purpose |
+|--------|---------|
+| `api.py` | High-level query functions |
+| `session.py` | Multi-turn conversation |
+| `manager.py` | Session lifecycle |
+| `executor.py` | CLI subprocess management |
+| `parser.py` | NDJSON stream parsing |
+| `reliability.py` | Circuit breaker, retry |
+| `rate_limiting.py` | Token bucket, sliding window |
+| `pricing.py` | Cost calculation |
+| `pool.py` | Concurrent execution |
+| `api_client.py` | API fallback (optional) |
+
+## Configuration
+
+### CLIAgentOptions (main config)
+```python
+CLIAgentOptions(
+    model="sonnet",           # haiku, sonnet, opus
+    timeout=300.0,            # seconds
+    max_tokens=4096,          # output limit
+    system_prompt="...",      # custom system prompt
+    permission_mode=PermissionMode.DEFAULT,
+    context={"key": "value"}, # injected context
+)
+```
+
+### Environment Variables
+- `CCFLOW_DEFAULT_MODEL` - Default model (sonnet)
+- `CCFLOW_DEFAULT_TIMEOUT` - Timeout in seconds (300)
+- `CCFLOW_LOG_LEVEL` - Logging level (INFO)
+- `CCFLOW_SESSION_STORAGE_PATH` - SQLite path
+
+## Message Types
+
+Union type for all messages:
+```python
+Message = InitMessage | TextMessage | ToolUseMessage | ToolResultMessage |
+          StopMessage | AssistantMessage | ResultMessage | ...
+```
+
+Common patterns:
+```python
+async for msg in query("prompt"):
+    if isinstance(msg, TextMessage):
+        print(msg.content)
+    elif isinstance(msg, ToolUseMessage):
+        print(f"Tool: {msg.tool}")
+```
+
+## Reliability Features
+
+### Rate Limiting
+```python
+from ccflow import get_limiter, CombinedLimiter
+limiter = CombinedLimiter(rate=10.0, max_concurrent=5)
+async with limiter.acquire():
+    # rate-limited operation
+```
+
+### Circuit Breaker
+```python
+from ccflow import get_cli_circuit_breaker
+breaker = get_cli_circuit_breaker()
+# Auto-opens after 5 failures, resets after 30s
+```
+
+### Retry with Backoff
+```python
+from ccflow import retry_with_backoff, RetryConfig
+result = await retry_with_backoff(async_func, RetryConfig(max_retries=3))
+```
+
+## Cost Tracking
+
+```python
+from ccflow import calculate_cost, get_usage_tracker
+
+cost = calculate_cost("sonnet", input_tokens=1000, output_tokens=500)
+# $0.0105
+
+tracker = get_usage_tracker()
+tracker.add("sonnet", 1000, 500)
+print(tracker.total_cost_usd)
+```
+
+## Events
+
+```python
+from ccflow import get_emitter, EventType
+
+emitter = get_emitter()
+emitter.on(EventType.TOKENS_USED, lambda e: print(f"Tokens: {e.total_tokens}"))
+```
+
+## Storage
+
+```python
+from ccflow import SQLiteSessionStore, MemorySessionStore
+
+# Persistent
+store = SQLiteSessionStore("sessions.db")
+
+# In-memory (testing)
+store = MemorySessionStore()
+```
+
+## Exceptions
+
+```
+CCFlowError (base)
+├── CLINotFoundError
+├── CLITimeoutError
+├── SessionNotFoundError
+├── CircuitBreakerError
+├── RateLimitExceededError
+└── APIClientError
+    └── APIRateLimitError
+```
+
+## Docker
+
+```bash
+# Build
+docker build -t ccflow .
+
+# Run (mount Claude credentials)
+docker run -v ~/.claude:/home/ccflow/.claude ccflow
+```
+
+## Files Structure
+
+```
+src/ccflow/
+├── __init__.py      # 307 exports
+├── api.py           # query(), batch_query()
+├── session.py       # Session class
+├── manager.py       # SessionManager
+├── executor.py      # CLIExecutor
+├── parser.py        # StreamParser
+├── types.py         # CLIAgentOptions, Message types
+├── exceptions.py    # Exception hierarchy
+├── events.py        # EventEmitter, event types
+├── reliability.py   # CircuitBreaker, retry
+├── rate_limiting.py # TokenBucket, SlidingWindow
+├── pricing.py       # ModelPricing, cost calc
+├── pool.py          # ProcessPool, StreamingPool
+├── api_client.py    # APIClient (fallback)
+├── store.py         # SessionStore protocol
+├── stores/
+│   ├── sqlite.py    # SQLiteSessionStore
+│   └── memory.py    # MemorySessionStore
+├── config.py        # CCFlowSettings
+└── metrics_handlers.py  # Prometheus integration
+```
+
+## Testing
+
+```bash
+pytest tests/ -v --cov=src/ccflow
+# 807+ tests, 80%+ coverage
+```
+
+## Links
+
+- Docs: docs/api.md
+- Source: src/ccflow/
+- Tests: tests/

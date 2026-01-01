@@ -11,11 +11,9 @@ Enables parallel execution of multiple Claude CLI queries with:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
@@ -23,6 +21,10 @@ import structlog
 from ccflow.executor import CLIExecutor
 from ccflow.reliability import get_correlation_id, set_correlation_id
 from ccflow.types import CLIAgentOptions
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 logger = structlog.get_logger(__name__)
 
@@ -160,9 +162,7 @@ class ProcessPool:
         self._executor = executor
 
         # Task management
-        self._queue: asyncio.Queue[PoolTask] = asyncio.Queue(
-            maxsize=self.config.max_queue_size
-        )
+        self._queue: asyncio.Queue[PoolTask] = asyncio.Queue(maxsize=self.config.max_queue_size)
         self._tasks: dict[str, PoolTask] = {}
         self._task_events: dict[str, asyncio.Event] = {}
 
@@ -244,15 +244,14 @@ class ProcessPool:
                         ),
                         timeout=self.config.shutdown_timeout,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "pool_shutdown_timeout",
                         remaining_tasks=len(
                             [
                                 t
                                 for t in self._tasks.values()
-                                if t.status
-                                in (TaskStatus.PENDING, TaskStatus.RUNNING)
+                                if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
                             ]
                         ),
                     )
@@ -443,12 +442,8 @@ class ProcessPool:
 
     def stats(self) -> PoolStats:
         """Get current pool statistics."""
-        active = sum(
-            1 for t in self._tasks.values() if t.status == TaskStatus.RUNNING
-        )
-        pending = sum(
-            1 for t in self._tasks.values() if t.status == TaskStatus.PENDING
-        )
+        active = sum(1 for t in self._tasks.values() if t.status == TaskStatus.RUNNING)
+        pending = sum(1 for t in self._tasks.values() if t.status == TaskStatus.PENDING)
 
         return PoolStats(
             pool_size=self.config.max_workers,
@@ -471,7 +466,7 @@ class ProcessPool:
                         self._queue.get(),
                         timeout=1.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if self._shutdown_event.is_set():
                         break
                     continue

@@ -8,6 +8,7 @@ generation, and server health checking.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -129,7 +130,7 @@ class MCPConfigManager:
         path = Path(path_str)
 
         try:
-            with open(fd, "w") as f:
+            with os.fdopen(fd, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:
             path.unlink(missing_ok=True)

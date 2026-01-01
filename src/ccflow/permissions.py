@@ -8,11 +8,12 @@ and MCP tool access patterns.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING
 
 import structlog
 
-from ccflow.types import PermissionMode
+if TYPE_CHECKING:
+    from ccflow.types import PermissionMode
 
 logger = structlog.get_logger(__name__)
 

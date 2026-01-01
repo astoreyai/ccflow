@@ -23,9 +23,9 @@ logger = structlog.get_logger(__name__)
 
 # Try to import toon-format library
 try:
-    from toon_format import encode as toon_encode
-    from toon_format import decode as toon_decode
     from toon_format import count_tokens
+    from toon_format import decode as toon_decode
+    from toon_format import encode as toon_encode
 
     TOON_AVAILABLE = True
 except ImportError:
@@ -121,9 +121,7 @@ class ToonSerializer:
             ToonEncodingError: If decoding fails
         """
         if not TOON_AVAILABLE:
-            raise ToonEncodingError(
-                "TOON library not installed. Cannot decode TOON format."
-            )
+            raise ToonEncodingError("TOON library not installed. Cannot decode TOON format.")
 
         try:
             return toon_decode(toon_str, {"strict": True})
@@ -207,6 +205,7 @@ def should_use_toon(data: Any) -> bool:
     Returns:
         True if TOON is likely beneficial
     """
+
     # Helper to calculate max nesting depth
     def max_depth(obj: Any, depth: int = 0) -> int:
         if isinstance(obj, dict):
@@ -221,11 +220,14 @@ def should_use_toon(data: Any) -> bool:
 
     # Check for uniform arrays (TOON's sweet spot)
     def has_uniform_array(obj: Any) -> bool:
-        if isinstance(obj, list) and len(obj) > 3:
-            if all(isinstance(item, dict) for item in obj):
-                keys = [frozenset(item.keys()) for item in obj]
-                if len(set(keys)) == 1:
-                    return True
+        if (
+            isinstance(obj, list)
+            and len(obj) > 3
+            and all(isinstance(item, dict) for item in obj)
+        ):
+            keys = [frozenset(item.keys()) for item in obj]
+            if len(set(keys)) == 1:
+                return True
         if isinstance(obj, dict):
             for value in obj.values():
                 if has_uniform_array(value):

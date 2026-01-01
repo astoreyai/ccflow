@@ -8,8 +8,9 @@ multiple sessions with automatic persistence and cleanup.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import datetime, timedelta
-from typing import AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -18,18 +19,20 @@ from ccflow.events import (
     SessionDeletedEvent,
     get_emitter,
 )
-from ccflow.metrics_handlers import PrometheusEventHandler, setup_metrics
 from ccflow.executor import CLIExecutor, get_executor
+from ccflow.metrics_handlers import PrometheusEventHandler, setup_metrics
 from ccflow.session import Session, load_session
 from ccflow.store import (
     SessionFilter,
     SessionMetadata,
-    SessionState,
     SessionStatus,
     SessionStore,
 )
-from ccflow.stores import MemorySessionStore, SQLiteSessionStore
+from ccflow.stores import SQLiteSessionStore
 from ccflow.types import CLIAgentOptions, Message
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = structlog.get_logger(__name__)
 
@@ -147,10 +150,8 @@ class SessionManager:
         # Cancel cleanup task
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
             self._cleanup_task = None
 
         # Close all active sessions
@@ -176,7 +177,12 @@ class SessionManager:
         await self.start()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Async context manager exit."""
         await self.stop()
 
@@ -542,7 +548,7 @@ def get_manager() -> SessionManager:
 
 async def init_manager(
     store: SessionStore | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> SessionManager:
     """Initialize and start the default session manager.
 

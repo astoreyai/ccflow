@@ -7,20 +7,17 @@ to ccflow functionality.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from ccflow.config import get_settings
-from ccflow.events import get_emitter
 from ccflow.exceptions import (
     CCFlowError,
     CLINotFoundError,
-    SessionNotFoundError,
 )
 from ccflow.manager import SessionManager
 from ccflow.rate_limiting import (
@@ -30,8 +27,6 @@ from ccflow.rate_limiting import (
 )
 from ccflow.reliability import (
     CircuitBreakerError,
-    HealthChecker,
-    HealthStatus,
     get_correlation_id,
     get_health_checker,
     set_correlation_id,
@@ -39,7 +34,10 @@ from ccflow.reliability import (
 from ccflow.types import CLIAgentOptions, Message
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import AsyncIterator
+
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 logger = structlog.get_logger(__name__)
 
@@ -47,7 +45,7 @@ logger = structlog.get_logger(__name__)
 try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, StreamingResponse
+    from fastapi.responses import StreamingResponse
     from pydantic import BaseModel, Field
 
     FASTAPI_AVAILABLE = True
@@ -160,9 +158,7 @@ class CCFlowServer:
             enable_metrics: Enable Prometheus metrics endpoint.
         """
         if not FASTAPI_AVAILABLE:
-            raise ImportError(
-                "FastAPI not installed. Install with: pip install ccflow[server]"
-            )
+            raise ImportError("FastAPI not installed. Install with: pip install ccflow[server]")
 
         self._manager = manager
         self._cors_origins = cors_origins or ["*"]
@@ -194,7 +190,7 @@ class CCFlowServer:
         return self._app
 
     @asynccontextmanager
-    async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+    async def _lifespan(self, _app: FastAPI) -> AsyncIterator[None]:
         """Application lifespan handler."""
         # Startup
         if self._manager is None:
@@ -209,10 +205,8 @@ class CCFlowServer:
 
         # Close WebSocket connections
         for ws in list(self._websocket_connections.values()):
-            try:
+            with suppress(Exception):
                 await ws.close()
-            except Exception:
-                pass
 
         logger.info("ccflow_server_stopped")
 
@@ -228,11 +222,11 @@ class CCFlowServer:
 
         # Add correlation ID middleware
         from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.requests import Request
-        from starlette.responses import Response
 
         class CorrelationIDMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request: Request, call_next) -> Response:
+            async def dispatch(
+                self, request: Request, call_next: Any
+            ) -> Response:
                 # Get or generate correlation ID
                 correlation_id = request.headers.get("X-Correlation-ID")
                 cid = set_correlation_id(correlation_id)
@@ -352,7 +346,7 @@ class CCFlowServer:
 
                 async for msg in session.send_message(request.prompt):
                     if hasattr(msg, "content") and msg.content:
-                        content_parts.append(msg.content)
+                        content_parts.append(str(msg.content))
                     # Aggregate tokens from stop message
                     if hasattr(msg, "usage"):
                         input_tokens = msg.usage.get("input_tokens", 0)
@@ -374,23 +368,23 @@ class CCFlowServer:
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail=str(e),
                     headers={"Retry-After": str(int(e.retry_after))},
-                )
+                ) from e
             except ConcurrencyLimitExceededError as e:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=str(e),
-                )
+                ) from e
             except CircuitBreakerError as e:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=f"Service temporarily unavailable: {e}",
                     headers={"Retry-After": str(int(e.retry_after))} if e.retry_after else None,
-                )
+                ) from e
             except CCFlowError as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=str(e),
-                )
+                ) from e
 
         @app.post("/query/stream", tags=["Query"])
         async def query_stream(request: QueryRequest) -> StreamingResponse:
@@ -402,6 +396,9 @@ class CCFlowServer:
                 )
 
             async def generate() -> AsyncIterator[str]:
+                manager = self._manager
+                assert manager is not None  # Checked above
+
                 options = CLIAgentOptions(
                     model=request.model or get_settings().default_model,
                     system_prompt=request.system_prompt,
@@ -414,7 +411,7 @@ class CCFlowServer:
                 )
 
                 try:
-                    session = await self._manager.create_session(options=options)
+                    session = await manager.create_session(options=options)
 
                     async for msg in session.send_message(request.prompt):
                         # Yield as Server-Sent Events
@@ -462,11 +459,11 @@ class CCFlowServer:
             if session_status:
                 try:
                     status_filter = SessionStatus(session_status)
-                except ValueError:
+                except ValueError as e:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid status: {session_status}",
-                    )
+                    ) from e
 
             sessions = await self._manager.list_sessions(
                 status=status_filter,
@@ -565,13 +562,13 @@ class CCFlowServer:
                 logger.debug("websocket_disconnected", connection_id=connection_id)
             except Exception as e:
                 logger.error("websocket_error", error=str(e))
-                try:
-                    await websocket.send_json({
-                        "type": "error",
-                        "error": str(e),
-                    })
-                except Exception:
-                    pass
+                with suppress(Exception):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": str(e),
+                        }
+                    )
             finally:
                 self._websocket_connections.pop(connection_id, None)
 
@@ -608,18 +605,22 @@ class CCFlowServer:
     async def _handle_ws_query(self, websocket: WebSocket, data: dict) -> None:
         """Handle WebSocket query request."""
         if self._manager is None:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Server not initialized",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "Server not initialized",
+                }
+            )
             return
 
         prompt = data.get("prompt", "")
         if not prompt:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Missing prompt",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "Missing prompt",
+                }
+            )
             return
 
         options = CLIAgentOptions(
@@ -637,10 +638,12 @@ class CCFlowServer:
             session = await self._manager.create_session(options=options)
 
             # Send session start
-            await websocket.send_json({
-                "type": "session_start",
-                "session_id": session.session_id,
-            })
+            await websocket.send_json(
+                {
+                    "type": "session_start",
+                    "session_id": session.session_id,
+                }
+            )
 
             async for msg in session.send_message(prompt):
                 event_data = _message_to_dict(msg)
@@ -648,41 +651,51 @@ class CCFlowServer:
 
             # Send done
             stats = await session.close()
-            await websocket.send_json({
-                "type": "done",
-                "session_id": session.session_id,
-                "stats": {
-                    "turns": stats.total_turns,
-                    "input_tokens": stats.total_input_tokens,
-                    "output_tokens": stats.total_output_tokens,
-                    "duration": stats.duration_seconds,
-                },
-            })
+            await websocket.send_json(
+                {
+                    "type": "done",
+                    "session_id": session.session_id,
+                    "stats": {
+                        "turns": stats.total_turns,
+                        "input_tokens": stats.total_input_tokens,
+                        "output_tokens": stats.total_output_tokens,
+                        "duration": stats.duration_seconds,
+                    },
+                }
+            )
 
         except RateLimitExceededError as e:
-            await websocket.send_json({
-                "type": "error",
-                "error": "rate_limit_exceeded",
-                "retry_after": e.retry_after,
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "rate_limit_exceeded",
+                    "retry_after": e.retry_after,
+                }
+            )
         except ConcurrencyLimitExceededError as e:
-            await websocket.send_json({
-                "type": "error",
-                "error": "concurrency_limit_exceeded",
-                "current": e.current,
-                "limit": e.limit,
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "concurrency_limit_exceeded",
+                    "current": e.current,
+                    "limit": e.limit,
+                }
+            )
         except CircuitBreakerError as e:
-            await websocket.send_json({
-                "type": "error",
-                "error": "circuit_breaker_open",
-                "retry_after": e.retry_after,
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "circuit_breaker_open",
+                    "retry_after": e.retry_after,
+                }
+            )
         except Exception as e:
-            await websocket.send_json({
-                "type": "error",
-                "error": str(e),
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": str(e),
+                }
+            )
 
 
 def _message_to_dict(msg: Message) -> dict:

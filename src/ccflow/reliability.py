@@ -11,11 +11,12 @@ import asyncio
 import random
 import time
 import uuid
+from collections.abc import Awaitable, Callable  # noqa: TC003
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -72,8 +73,8 @@ def bind_correlation_id(log: Any = None) -> structlog.BoundLogger:
 class CircuitState(str, Enum):
     """Circuit breaker states."""
 
-    CLOSED = "closed"      # Normal operation, requests pass through
-    OPEN = "open"          # Failing, requests rejected immediately
+    CLOSED = "closed"  # Normal operation, requests pass through
+    OPEN = "open"  # Failing, requests rejected immediately
     HALF_OPEN = "half_open"  # Testing if service recovered
 
 
@@ -176,18 +177,17 @@ class CircuitBreaker:
 
     async def _check_state(self) -> None:
         """Check and potentially transition state."""
-        if self._state == CircuitState.OPEN:
-            if self._last_failure_time is not None:
-                elapsed = time.monotonic() - self._last_failure_time
-                if elapsed >= self.config.reset_timeout:
-                    self._state = CircuitState.HALF_OPEN
-                    self._success_count = 0
-                    self._half_open_calls = 0
-                    self._log.info(
-                        "circuit_half_open",
-                        elapsed=elapsed,
-                        correlation_id=get_correlation_id(),
-                    )
+        if self._state == CircuitState.OPEN and self._last_failure_time is not None:
+            elapsed = time.monotonic() - self._last_failure_time
+            if elapsed >= self.config.reset_timeout:
+                self._state = CircuitState.HALF_OPEN
+                self._success_count = 0
+                self._half_open_calls = 0
+                self._log.info(
+                    "circuit_half_open",
+                    elapsed=elapsed,
+                    correlation_id=get_correlation_id(),
+                )
 
     async def _record_success(self) -> None:
         """Record a successful call."""
@@ -274,7 +274,9 @@ class CircuitBreaker:
             await self._record_failure(e)
             raise
 
-    def protect(self, func: Callable[..., T]) -> Callable[..., T]:
+    def protect(
+        self, func: Callable[..., Awaitable[T]]
+    ) -> Callable[..., Awaitable[T]]:
         """Decorator to protect an async function with circuit breaker.
 
         Example:
@@ -282,13 +284,14 @@ class CircuitBreaker:
             ... async def risky_call():
             ...     return await external_service()
         """
+
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             async with self.call():
                 return await func(*args, **kwargs)
 
         wrapper.__name__ = func.__name__
         wrapper.__doc__ = func.__doc__
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     async def reset(self) -> None:
         """Manually reset circuit breaker to closed state."""
@@ -388,7 +391,7 @@ def calculate_delay(
         Delay in seconds with jitter applied
     """
     # Exponential backoff
-    delay = config.base_delay * (config.exponential_base ** attempt)
+    delay = config.base_delay * (config.exponential_base**attempt)
 
     # Cap at max delay
     delay = min(delay, config.max_delay)
@@ -402,7 +405,7 @@ def calculate_delay(
 
 
 async def retry_with_backoff(
-    func: Callable[..., T],
+    func: Callable[..., Awaitable[T]],
     *args: Any,
     config: RetryConfig | None = None,
     **kwargs: Any,
@@ -451,7 +454,7 @@ async def retry_with_backoff(
                     f"All {config.max_retries + 1} attempts failed",
                     attempts=attempt + 1,
                     last_error=e,
-                )
+                ) from e
 
             delay = calculate_delay(attempt, config)
             total_delay += delay
@@ -477,7 +480,9 @@ async def retry_with_backoff(
     )
 
 
-def with_retry(config: RetryConfig | None = None):
+def with_retry(
+    config: RetryConfig | None = None,
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
     """Decorator for retry with backoff.
 
     Example:
@@ -485,17 +490,19 @@ def with_retry(config: RetryConfig | None = None):
         ... async def risky_operation():
         ...     return await external_call()
     """
-    config = config or RetryConfig()
+    cfg = config or RetryConfig()
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(
+        func: Callable[..., Awaitable[T]],
+    ) -> Callable[..., Awaitable[T]]:
         async def wrapper(*args: Any, **kwargs: Any) -> T:
-            return await retry_with_backoff(func, *args, config=config, **kwargs)
+            return await retry_with_backoff(func, *args, config=cfg, **kwargs)
 
         wrapper.__name__ = func.__name__
         wrapper.__doc__ = func.__doc__
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
-    return decorator
+    return decorator  # type: ignore[return-value]
 
 
 # =============================================================================
@@ -607,7 +614,8 @@ class HealthChecker:
         try:
             proc = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
-                    "claude", "--version",
+                    "claude",
+                    "--version",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 ),
@@ -630,7 +638,7 @@ class HealthChecker:
 
             version = stdout.decode().strip()
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return HealthStatus(
                 healthy=False,
                 cli_available=True,
@@ -654,9 +662,13 @@ class HealthChecker:
         try:
             proc = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
-                    "claude", "-p", "--print",
-                    "--output-format", "json",
-                    "--max-budget-usd", "0.01",
+                    "claude",
+                    "-p",
+                    "--print",
+                    "--output-format",
+                    "json",
+                    "--max-budget-usd",
+                    "0.01",
                     "Reply with exactly: OK",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -706,7 +718,7 @@ class HealthChecker:
                 version=version,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             latency_ms = (time.monotonic() - start_time) * 1000
             return HealthStatus(
                 healthy=False,

@@ -11,12 +11,15 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import structlog
 
 from ccflow.config import get_settings
 from ccflow.exceptions import CCFlowError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 logger = structlog.get_logger(__name__)
 
@@ -425,17 +428,17 @@ class ConcurrencyLimiter:
         """
         if self._wait_timeout is not None:
             try:
-                acquired = await asyncio.wait_for(
+                await asyncio.wait_for(
                     self._semaphore.acquire(),
                     timeout=self._wait_timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._total_rejected += 1
                 raise ConcurrencyLimitExceededError(
                     f"Concurrency limit exceeded ({self._current}/{self._max_concurrent})",
                     current=self._current,
                     limit=self._max_concurrent,
-                )
+                ) from None
         else:
             await self._semaphore.acquire()
 
@@ -457,10 +460,9 @@ class ConcurrencyLimiter:
         Returns:
             True if acquired, False otherwise
         """
-        if self._semaphore.locked():
-            if self._current >= self._max_concurrent:
-                self._total_rejected += 1
-                return False
+        if self._semaphore.locked() and self._current >= self._max_concurrent:
+            self._total_rejected += 1
+            return False
 
         # Non-blocking acquire attempt
         try:
@@ -503,9 +505,7 @@ class RetryConfig:
     max_delay: float = 60.0
     exponential_base: float = 2.0
     jitter: bool = True
-    retry_on: tuple[type[Exception], ...] = field(
-        default_factory=lambda: (RateLimitExceededError,)
-    )
+    retry_on: tuple[type[Exception], ...] = field(default_factory=lambda: (RateLimitExceededError,))
 
 
 class RetryHandler:
@@ -552,9 +552,7 @@ class RetryHandler:
         """Calculate delay for retry attempt."""
         import random
 
-        delay = self._config.initial_delay * (
-            self._config.exponential_base ** attempt
-        )
+        delay = self._config.initial_delay * (self._config.exponential_base**attempt)
         delay = min(delay, self._config.max_delay)
 
         if self._config.jitter:
@@ -565,8 +563,8 @@ class RetryHandler:
     async def execute(
         self,
         func: Callable[..., T],
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> T:
         """Execute function with retry logic.
 

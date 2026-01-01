@@ -91,10 +91,9 @@ class MemorySessionStore(BaseSessionStore):
             if filter.max_turns is not None and state.turn_count > filter.max_turns:
                 continue
 
-            if filter.tags:
+            if filter.tags and not any(tag in state.tags for tag in filter.tags):
                 # Match any tag
-                if not any(tag in state.tags for tag in filter.tags):
-                    continue
+                continue
 
             results.append(state.to_metadata())
 
@@ -117,11 +116,7 @@ class MemorySessionStore(BaseSessionStore):
     async def cleanup(self, older_than: timedelta) -> int:
         """Delete sessions older than specified duration."""
         cutoff = datetime.now() - older_than
-        to_delete = [
-            sid
-            for sid, state in self._sessions.items()
-            if state.updated_at < cutoff
-        ]
+        to_delete = [sid for sid, state in self._sessions.items() if state.updated_at < cutoff]
 
         for sid in to_delete:
             del self._sessions[sid]

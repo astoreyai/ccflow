@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import AsyncIterator
+from collections.abc import Callable  # noqa: TC003
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from ccflow.executor import CLIExecutor, get_executor
+from ccflow.executor import get_executor
 from ccflow.metrics import record_error, record_request, record_toon_savings
 from ccflow.parser import StreamParser, collect_text
 from ccflow.toon_integration import ToonSerializer
@@ -25,6 +26,9 @@ from ccflow.types import (
     ResultMessage,
     StopMessage,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = structlog.get_logger(__name__)
 
@@ -184,7 +188,7 @@ async def batch_query(
                 async for msg in query(prompt, opts):
                     if isinstance(msg, InitMessage):
                         session_id = msg.session_id
-                    elif hasattr(msg, "content"):
+                    elif hasattr(msg, "content") and isinstance(msg.content, str):
                         text_parts.append(msg.content)
                     elif isinstance(msg, StopMessage):
                         input_tokens = msg.usage.get("input_tokens", 0)
@@ -252,7 +256,7 @@ async def batch_query(
 
 async def stream_to_callback(
     prompt: str,
-    callback: callable,
+    callback: Callable[[Any], None],
     options: CLIAgentOptions | None = None,
 ) -> QueryResult:
     """Execute query with callback for each message.
@@ -282,7 +286,7 @@ async def stream_to_callback(
 
             if isinstance(msg, InitMessage):
                 session_id = msg.session_id
-            elif hasattr(msg, "content"):
+            elif hasattr(msg, "content") and isinstance(msg.content, str):
                 text_parts.append(msg.content)
             elif isinstance(msg, StopMessage):
                 input_tokens = msg.usage.get("input_tokens", 0)

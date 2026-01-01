@@ -28,7 +28,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose output",
     )
@@ -80,7 +81,8 @@ Examples:
     )
 
     query_parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default=None,
         help="Model to use (sonnet, opus, haiku)",
     )
@@ -203,7 +205,8 @@ def _add_sessions_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Session ID to delete",
     )
     delete_parser.add_argument(
-        "-f", "--force",
+        "-f",
+        "--force",
         action="store_true",
         help="Force delete without confirmation",
     )
@@ -359,6 +362,7 @@ async def run_query(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         return 1
 
@@ -389,6 +393,7 @@ async def run_sessions(args: argparse.Namespace) -> int:
 
             if args.json:
                 import json
+
                 data = [
                     {
                         "session_id": s.session_id,
@@ -410,7 +415,9 @@ async def run_sessions(args: argparse.Namespace) -> int:
                 print("-" * 90)
                 for s in sessions:
                     updated = s.updated_at.strftime("%Y-%m-%d %H:%M")
-                    print(f"{s.session_id:<40} {s.model or 'unknown':<10} {s.status.value:<10} {s.turn_count:<6} {updated}")
+                    print(
+                        f"{s.session_id:<40} {s.model or 'unknown':<10} {s.status.value:<10} {s.turn_count:<6} {updated}"
+                    )
 
         elif action == "get":
             # Get session details
@@ -421,7 +428,8 @@ async def run_sessions(args: argparse.Namespace) -> int:
 
             if args.json:
                 import json
-                data = {
+
+                session_data = {
                     "session_id": session.session_id,
                     "model": session.options.model if session.options else None,
                     "turn_count": session.turn_count,
@@ -430,7 +438,7 @@ async def run_sessions(args: argparse.Namespace) -> int:
                     "updated_at": session.updated_at.isoformat(),
                     "tags": list(session.tags),
                 }
-                print(json.dumps(data, indent=2))
+                print(json.dumps(session_data, indent=2))
             else:
                 print(f"Session ID:  {session.session_id}")
                 print(f"Model:       {session.options.model if session.options else 'unknown'}")
@@ -485,13 +493,19 @@ async def run_server(args: argparse.Namespace) -> int:
     try:
         import uvicorn
     except ImportError:
-        print("Error: uvicorn not installed. Install with: pip install ccflow[server]", file=sys.stderr)
+        print(
+            "Error: uvicorn not installed. Install with: pip install ccflow[server]",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         from ccflow.server import CCFlowServer
     except ImportError:
-        print("Error: FastAPI not installed. Install with: pip install ccflow[server]", file=sys.stderr)
+        print(
+            "Error: FastAPI not installed. Install with: pip install ccflow[server]",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"Starting ccflow server on {args.host}:{args.port}")
@@ -499,6 +513,7 @@ async def run_server(args: argparse.Namespace) -> int:
     # Start metrics server if requested
     if args.metrics_port:
         from ccflow.metrics_handlers import start_metrics_server
+
         if start_metrics_server(args.metrics_port):
             print(f"Metrics available at http://{args.host}:{args.metrics_port}/metrics")
 
@@ -539,6 +554,7 @@ async def run_stats(args: argparse.Namespace) -> int:
 
     if args.json:
         import json
+
         print(json.dumps(stats, indent=2, default=str))
     else:
         print("Session Statistics:")

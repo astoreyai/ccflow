@@ -133,11 +133,11 @@ def get_pricing(model: str) -> ModelPricing:
 
     # Tier-based fallback
     if "opus" in model_lower:
-        return CLAUDE_3_OPUS
+        return OPUS_PRICING
     elif "haiku" in model_lower:
-        return CLAUDE_3_HAIKU
+        return HAIKU_PRICING
     elif "sonnet" in model_lower:
-        return CLAUDE_3_5_SONNET
+        return SONNET_PRICING
 
     logger.debug("pricing_not_found", model=model, using_default=True)
     return DEFAULT_PRICING
@@ -328,9 +328,7 @@ def extract_usage_from_events(events: list[dict]) -> dict[str, int]:
 
                 # Cache tokens if present
                 if "cache_creation_input_tokens" in event_usage:
-                    usage["cache_write_tokens"] = event_usage[
-                        "cache_creation_input_tokens"
-                    ]
+                    usage["cache_write_tokens"] = event_usage["cache_creation_input_tokens"]
                 if "cache_read_input_tokens" in event_usage:
                     usage["cache_read_tokens"] = event_usage["cache_read_input_tokens"]
 

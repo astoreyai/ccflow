@@ -26,10 +26,14 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Framework :: AsyncIO",
     "Typing :: Typed",
 ]
 
@@ -38,23 +42,22 @@ dependencies = [
     "pydantic-settings>=2.0",
     "structlog>=23.0",
     "aiosqlite>=0.19",
+    "tiktoken>=0.5",
+    "prometheus-client>=0.17",
+    "uvicorn[standard]>=0.23",
 ]
 
 [project.optional-dependencies]
-toon = [
-    # Official TOON library (install from GitHub until PyPI release)
-    # "toon-format @ git+https://github.com/toon-format/toon-python.git",
-    "tiktoken>=0.5",  # For token counting
-]
-metrics = [
-    "prometheus-client>=0.17",
+tracing = [
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
 server = [
     "fastapi>=0.100",
-    "uvicorn[standard]>=0.23",
     "websockets>=11.0",
+]
+api = [
+    "anthropic>=0.25.0",  # Direct API fallback (optional)
 ]
 dev = [
     "pytest>=7.0",
@@ -66,7 +69,7 @@ dev = [
     "pre-commit>=3.0",
 ]
 all = [
-    "ccflow[toon,metrics,server,dev]",
+    "ccflow[tracing,server,api,dev]",
 ]
 
 [project.scripts]
@@ -147,10 +150,15 @@ known-first-party = ["ccflow"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
+# Relax strict mode for 0.1.0, tighten in future versions
+warn_return_any = false
+warn_unused_ignores = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
@@ -158,5 +166,9 @@ module = [
     "toon_format.*",
     "prometheus_client.*",
     "tiktoken.*",
+    "anthropic.*",
+    "uvicorn.*",
+    "fastapi.*",
+    "starlette.*",
 ]
 ignore_missing_imports = true

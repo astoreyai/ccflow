@@ -7,9 +7,7 @@ Used as fallback when CLI is unavailable (circuit breaker open, health check fai
 
 from __future__ import annotations
 
-import asyncio
 import time
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +17,8 @@ from ccflow.exceptions import CCFlowError
 from ccflow.reliability import bind_correlation_id, get_correlation_id, set_correlation_id
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from ccflow.types import CLIAgentOptions
 
 logger = structlog.get_logger(__name__)
@@ -259,10 +259,9 @@ class APIClient:
         messages: list[dict],
         system: str | None,
         options: CLIAgentOptions,
-        log: structlog.BoundLogger,
+        _log: structlog.BoundLogger,
     ) -> AsyncIterator[dict]:
         """Stream response from API."""
-        from ccflow.types import CLIAgentOptions
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -292,9 +291,8 @@ class APIClient:
                             "content": text,
                         }
 
-                elif event.type == "message_delta":
-                    if hasattr(event, "usage"):
-                        output_tokens = event.usage.output_tokens
+                elif event.type == "message_delta" and hasattr(event, "usage"):
+                    output_tokens = event.usage.output_tokens
 
         # Emit stop event
         yield {
@@ -324,10 +322,9 @@ class APIClient:
         messages: list[dict],
         system: str | None,
         options: CLIAgentOptions,
-        log: structlog.BoundLogger,
+        _log: structlog.BoundLogger,
     ) -> AsyncIterator[dict]:
         """Get non-streaming response from API."""
-        from ccflow.types import CLIAgentOptions
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -532,15 +529,11 @@ class FallbackExecutor:
 
         if use_api:
             if not self.api_client.is_available:
-                raise APINotAvailableError(
-                    "API fallback requested but API client not available"
-                )
+                raise APINotAvailableError("API fallback requested but API client not available")
 
             log.info("using_api_fallback", reason=reason)
 
-            async for event in self.api_client.execute(
-                prompt, options, correlation_id=cid
-            ):
+            async for event in self.api_client.execute(prompt, options, correlation_id=cid):
                 # Add fallback indicator
                 event["_fallback"] = True
                 event["_fallback_reason"] = reason
@@ -578,9 +571,7 @@ class FallbackExecutor:
                 if should_fallback and self.api_client.is_available:
                     log.info("cli_failed_using_api_fallback", reason=reason, error=str(e))
 
-                    async for event in self.api_client.execute(
-                        prompt, options, correlation_id=cid
-                    ):
+                    async for event in self.api_client.execute(prompt, options, correlation_id=cid):
                         event["_fallback"] = True
                         event["_fallback_reason"] = reason
                         yield event

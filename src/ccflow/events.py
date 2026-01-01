@@ -8,10 +8,11 @@ session events, message flow, and usage statistics.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -498,11 +499,9 @@ class CostTracker:
         for session_id in self._session_costs:
             result[session_id] = {
                 "cost": self._session_costs.get(session_id, 0.0),
-                "tokens": self._session_tokens.get(
-                    session_id, {"input": 0, "output": 0}
-                ),
+                "tokens": self._session_tokens.get(session_id, {"input": 0, "output": 0}),
             }
-        return result
+        return result  # type: ignore[return-value]
 
     def clear(self) -> None:
         """Clear all tracked costs."""
@@ -529,9 +528,7 @@ class CostTracker:
         if event.session_id is None:
             return
 
-        if event.type == EventType.TURN_COMPLETED and isinstance(
-            event, TurnCompletedEvent
-        ):
+        if event.type == EventType.TURN_COMPLETED and isinstance(event, TurnCompletedEvent):
             # Initialize if needed
             if event.session_id not in self._session_costs:
                 self._session_costs[event.session_id] = 0.0
@@ -554,9 +551,7 @@ class CostTracker:
             self._session_tokens[event.session_id]["input"] += event.input_tokens
             self._session_tokens[event.session_id]["output"] += event.output_tokens
 
-            cost = self._calculate_cost(
-                event.model, event.input_tokens, event.output_tokens
-            )
+            cost = self._calculate_cost(event.model, event.input_tokens, event.output_tokens)
             self._session_costs[event.session_id] += cost
 
 

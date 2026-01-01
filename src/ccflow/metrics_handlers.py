@@ -17,7 +17,6 @@ from ccflow.events import (
     Event,
     EventType,
     SessionClosedEvent,
-    SessionCreatedEvent,
     SessionErrorEvent,
     TokensUsedEvent,
     TurnCompletedEvent,
@@ -35,10 +34,10 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
-    Counter = None  # type: ignore
-    Gauge = None  # type: ignore
-    Histogram = None  # type: ignore
-    start_http_server = None  # type: ignore
+    Counter = None  # type: ignore[misc,assignment]
+    Gauge = None  # type: ignore[misc,assignment]
+    Histogram = None  # type: ignore[misc,assignment]
+    start_http_server = None  # type: ignore[assignment]
 
 
 class PrometheusEventHandler:
@@ -205,7 +204,7 @@ class PrometheusEventHandler:
                 error=str(e),
             )
 
-    def _handle_session_created(self, event: Event) -> None:
+    def _handle_session_created(self, _event: Event) -> None:
         """Handle session created event."""
         if self._active_sessions is not None:
             self._active_sessions.inc()
@@ -289,7 +288,29 @@ class PrometheusEventHandler:
 
     @classmethod
     def reset_metrics(cls) -> None:
-        """Reset all metrics (for testing)."""
+        """Reset all metrics (for testing).
+
+        This unregisters metrics from the Prometheus registry to allow
+        re-initialization with potentially different configurations.
+        """
+        if PROMETHEUS_AVAILABLE:
+            from prometheus_client import REGISTRY
+
+            # Unregister all metrics from the registry
+            collectors_to_remove = []
+            for collector in REGISTRY._names_to_collectors.values():
+                # Check if it's one of our metrics by name prefix
+                if hasattr(collector, "_name"):
+                    name = collector._name
+                    if name.startswith("ccflow_") or name.startswith("custom_"):
+                        collectors_to_remove.append(collector)
+
+            import contextlib
+
+            for collector in collectors_to_remove:
+                with contextlib.suppress(Exception):
+                    REGISTRY.unregister(collector)
+
         cls._metrics_initialized = False
         cls._requests_total = None
         cls._request_duration = None
@@ -359,6 +380,7 @@ def setup_metrics(
 
     if emitter is None:
         from ccflow.events import get_emitter
+
         emitter = get_emitter()
 
     handler.register(emitter)

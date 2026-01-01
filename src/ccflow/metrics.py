@@ -8,9 +8,9 @@ and session statistics.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from functools import wraps
-from typing import Any, Callable, Generator, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -25,10 +25,10 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
-    Counter = None  # type: ignore
-    Gauge = None  # type: ignore
-    Histogram = None  # type: ignore
-    Info = None  # type: ignore
+    Counter = None  # type: ignore[misc,assignment]
+    Gauge = None  # type: ignore[misc,assignment]
+    Histogram = None  # type: ignore[misc,assignment]
+    Info = None  # type: ignore[misc,assignment]
     logger.debug("prometheus_not_available", message="Install with: pip install prometheus-client")
 
 
@@ -104,16 +104,16 @@ if PROMETHEUS_AVAILABLE:
 
 else:
     # Dummy metrics when prometheus not available
-    REQUESTS_TOTAL = None
-    REQUEST_DURATION = None
-    TOKENS_INPUT = None
-    TOKENS_OUTPUT = None
-    TOON_SAVINGS_RATIO = None
-    TOON_TOKENS_SAVED = None
-    ACTIVE_SESSIONS = None
-    SESSION_TURNS = None
-    ERRORS_TOTAL = None
-    BUILD_INFO = None
+    REQUESTS_TOTAL = None  # type: ignore[assignment]
+    REQUEST_DURATION = None  # type: ignore[assignment]
+    TOKENS_INPUT = None  # type: ignore[assignment]
+    TOKENS_OUTPUT = None  # type: ignore[assignment]
+    TOON_SAVINGS_RATIO = None  # type: ignore[assignment]
+    TOON_TOKENS_SAVED = None  # type: ignore[assignment]
+    ACTIVE_SESSIONS = None  # type: ignore[assignment]
+    SESSION_TURNS = None  # type: ignore[assignment]
+    ERRORS_TOTAL = None  # type: ignore[assignment]
+    BUILD_INFO = None  # type: ignore[assignment]
 
 
 def record_request(
@@ -269,16 +269,19 @@ def set_build_info(version: str, **extra: str) -> None:
     if not PROMETHEUS_AVAILABLE or BUILD_INFO is None:
         return
 
-    BUILD_INFO.info({
-        "version": version,
-        **extra,
-    })
+    BUILD_INFO.info(
+        {
+            "version": version,
+            **extra,
+        }
+    )
 
 
 # Initialize build info on import
 if PROMETHEUS_AVAILABLE and BUILD_INFO is not None:
     try:
         from ccflow import __version__
+
         set_build_info(__version__)
     except ImportError:
         pass

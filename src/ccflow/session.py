@@ -10,11 +10,12 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING
 
 import structlog
 
 from ccflow.events import (
+    Event,
     EventEmitter,
     SessionClosedEvent,
     SessionCreatedEvent,
@@ -39,7 +40,7 @@ from ccflow.types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import AsyncIterator
 
 logger = structlog.get_logger(__name__)
 
@@ -123,12 +124,12 @@ class Session:
             )
         )
 
-    def _emit_sync(self, event) -> None:
+    def _emit_sync(self, event: Event) -> None:
         """Emit event synchronously."""
         if self._emitter is not None:
             self._emitter.emit_sync(event)
 
-    async def _emit(self, event) -> None:
+    async def _emit(self, event: Event) -> None:
         """Emit event asynchronously."""
         if self._emitter is not None:
             await self._emitter.emit(event)
@@ -137,6 +138,21 @@ class Session:
     def session_id(self) -> str:
         """Get session UUID."""
         return self._session_id
+
+    @property
+    def options(self) -> CLIAgentOptions:
+        """Get session options."""
+        return self._options
+
+    @property
+    def created_at(self) -> datetime:
+        """Get session creation time."""
+        return self._created_at
+
+    @property
+    def updated_at(self) -> datetime:
+        """Get last update time (approximated as now for active sessions)."""
+        return datetime.now()
 
     @property
     def turn_count(self) -> int:
@@ -275,10 +291,9 @@ class Session:
             msg = self._parser.parse_event(event)
 
             # Update session ID from init message if needed
-            if isinstance(msg, InitMessage):
-                if self._is_first_message:
-                    self._session_id = msg.session_id
-                    logger.debug("session_id_updated", session_id=self._session_id)
+            if isinstance(msg, InitMessage) and self._is_first_message:
+                self._session_id = msg.session_id
+                logger.debug("session_id_updated", session_id=self._session_id)
 
             # Collect response text for integrity tracking
             if isinstance(msg, TextMessage):

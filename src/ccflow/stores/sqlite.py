@@ -210,7 +210,7 @@ class SQLiteSessionStore(BaseSessionStore):
             row = self._state_to_row(state)
             columns = ", ".join(row.keys())
             placeholders = ", ".join("?" * len(row))
-            update_clause = ", ".join(f"{k}=excluded.{k}" for k in row.keys())
+            update_clause = ", ".join(f"{k}=excluded.{k}" for k in row)
 
             sql = f"""
                 INSERT INTO sessions ({columns})

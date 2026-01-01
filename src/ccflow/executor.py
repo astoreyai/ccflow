@@ -9,10 +9,10 @@ circuit breaker, and retry logic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import shutil
-from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -31,12 +31,13 @@ from ccflow.reliability import (
     RetryExhaustedError,
     bind_correlation_id,
     get_cli_circuit_breaker,
-    get_correlation_id,
-    retry_with_backoff,
     set_correlation_id,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
     from ccflow.rate_limiting import CombinedLimiter
     from ccflow.types import CLIAgentOptions
 
@@ -117,15 +118,11 @@ class CLIExecutor:
         self._use_retry = use_retry
 
         # Circuit breaker
+        self._circuit_breaker: CircuitBreaker | None = None
         if circuit_breaker is not None:
             self._circuit_breaker = circuit_breaker
-        elif use_circuit_breaker:
-            if circuit_breaker_config:
-                self._circuit_breaker = CircuitBreaker(circuit_breaker_config, name="cli")
-            else:
-                self._circuit_breaker = None  # Will use global
-        else:
-            self._circuit_breaker = None
+        elif use_circuit_breaker and circuit_breaker_config:
+            self._circuit_breaker = CircuitBreaker(circuit_breaker_config, name="cli")
         self._use_circuit_breaker = use_circuit_breaker
 
     def _find_cli(self) -> str:
@@ -144,6 +141,7 @@ class CLIExecutor:
 
         if self._use_global_limiter:
             from ccflow.rate_limiting import get_limiter
+
             return get_limiter()
 
         return None
@@ -198,10 +196,12 @@ class CLIExecutor:
             flags.extend(["--append-system-prompt", options.append_system_prompt])
 
         # Permissions
-        perm_mode = options.permission_mode
-        if hasattr(perm_mode, 'value'):
-            perm_mode = perm_mode.value
-        flags.extend(["--permission-mode", perm_mode])
+        perm_mode_value = (
+            options.permission_mode.value
+            if hasattr(options.permission_mode, "value")
+            else str(options.permission_mode)
+        )
+        flags.extend(["--permission-mode", perm_mode_value])
 
         if options.allowed_tools:
             flags.append("--allowedTools")
@@ -346,7 +346,7 @@ class CLIExecutor:
             CircuitBreakerError: If circuit breaker is open
         """
         # Set correlation ID for this request
-        cid = set_correlation_id(correlation_id)
+        set_correlation_id(correlation_id)
         log = bind_correlation_id()
 
         limiter = None if skip_rate_limit else self._get_limiter()
@@ -379,14 +379,10 @@ class CLIExecutor:
                     if wait_time > 0:
                         log.debug("rate_limit_waited", wait_time=f"{wait_time:.2f}s")
 
-                    async for event in self._execute_with_retry(
-                        prompt, flags, timeout, cwd, log
-                    ):
+                    async for event in self._execute_with_retry(prompt, flags, timeout, cwd, log):
                         yield event
             else:
-                async for event in self._execute_with_retry(
-                    prompt, flags, timeout, cwd, log
-                ):
+                async for event in self._execute_with_retry(prompt, flags, timeout, cwd, log):
                     yield event
 
     async def _execute_with_retry(
@@ -409,7 +405,6 @@ class CLIExecutor:
 
         # For streaming, we can only retry the initial connection
         # Once we start yielding events, we can't retry
-        last_error: Exception | None = None
 
         for attempt in range(self._retry_config.max_retries + 1):
             try:
@@ -417,8 +412,6 @@ class CLIExecutor:
                     yield event
                 return  # Success, exit retry loop
             except self._retry_config.retryable_errors as e:
-                last_error = e
-
                 if attempt == self._retry_config.max_retries:
                     log.warning(
                         "retry_exhausted",
@@ -432,6 +425,7 @@ class CLIExecutor:
                     ) from e
 
                 from ccflow.reliability import calculate_delay
+
                 delay = calculate_delay(attempt, self._retry_config)
 
                 log.info(
@@ -492,10 +486,10 @@ class CLIExecutor:
                 raise CLIExecutionError(
                     f"CLI exited with code {process.returncode}",
                     stderr=stderr,
-                    exit_code=process.returncode,
+                    exit_code=process.returncode or -1,
                 )
 
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise CLITimeoutError(timeout) from e
 
     async def _stream_output(
@@ -553,7 +547,7 @@ class CLIExecutor:
             try:
                 process.terminate()
                 await asyncio.wait_for(process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
             finally:
                 self._active_processes.pop(process_id, None)
@@ -582,10 +576,8 @@ class CLIExecutor:
 
     def __del__(self) -> None:
         """Clean up on garbage collection."""
-        try:
+        with contextlib.suppress(Exception):
             self.cleanup()
-        except Exception:
-            pass  # Ignore errors during cleanup
 
 
 # Module-level default executor

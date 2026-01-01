@@ -8,7 +8,6 @@ state, with implementations for SQLite and in-memory storage.
 from __future__ import annotations
 
 import hashlib
-import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -362,14 +361,22 @@ class BaseSessionStore(ABC):
         await self.save(state)
         return True
 
-    async def close(self) -> None:
-        """Close store and release resources."""
-        pass
+    async def close(self) -> None:  # noqa: B027
+        """Close store and release resources.
+
+        Default implementation does nothing. Override in subclasses
+        that need cleanup (e.g., database connections).
+        """
 
     async def __aenter__(self) -> BaseSessionStore:
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Async context manager exit."""
         await self.close()

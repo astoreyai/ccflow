@@ -1,0 +1,36 @@
+# =============================================================================
+# Prometheus Configuration for ccflow
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  # Attach these labels to any time series or alerts
+  external_labels:
+    monitor: 'ccflow'
+
+# Alerting configuration (optional - add alertmanager if needed)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# Rule files (optional - add alerting rules)
+# rule_files:
+#   - 'rules/*.yml'
+
+# Scrape configurations
+scrape_configs:
+  # ccflow metrics
+  - job_name: 'ccflow'
+    static_configs:
+      - targets: ['ccflow:9090']
+    metrics_path: /metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

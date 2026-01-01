@@ -183,7 +183,7 @@ def configure_logging(settings: CCFlowSettings | None = None) -> None:
         ]
 
     structlog.configure(
-        processors=processors,
+        processors=processors,  # type: ignore[arg-type]
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
