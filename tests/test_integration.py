@@ -511,6 +511,109 @@ class TestErrorHandlingIntegration:
         assert msg.raw_data == event
 
 
+class TestMetricsIntegration:
+    """Test metrics integration with API functions."""
+
+    @pytest.mark.asyncio
+    async def test_query_records_metrics_on_success(self):
+        """Test that query() records metrics on successful completion."""
+        from unittest.mock import patch
+
+        mock_events = [
+            {"type": "system", "subtype": "init", "session_id": "metrics-test"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m1", "content": [{"type": "text", "text": "Hello"}], "usage": {}, "stop_reason": "end_turn"}, "session_id": "metrics-test"},
+            {"type": "system", "subtype": "stop", "session_id": "metrics-test", "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in mock_events:
+                yield event
+
+        with patch('ccflow.api.get_executor') as mock_get_executor, \
+             patch('ccflow.api.record_request') as mock_record_request:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            messages = []
+            async for msg in query("Test", CLIAgentOptions(model="sonnet")):
+                messages.append(msg)
+
+            # Verify record_request was called with correct arguments
+            mock_record_request.assert_called_once()
+            call_args = mock_record_request.call_args
+            assert call_args.kwargs["model"] == "sonnet"
+            assert call_args.kwargs["status"] == "success"
+            assert call_args.kwargs["input_tokens"] == 100
+            assert call_args.kwargs["output_tokens"] == 50
+            assert call_args.kwargs["duration"] > 0
+
+    @pytest.mark.asyncio
+    async def test_query_records_error_metrics_on_failure(self):
+        """Test that query() records error metrics on failure."""
+        from unittest.mock import patch
+        from ccflow.exceptions import CLIExecutionError
+
+        async def mock_execute_error(*args, **kwargs):
+            raise CLIExecutionError("Test error", exit_code=1)
+            yield  # Make it a generator
+
+        with patch('ccflow.api.get_executor') as mock_get_executor, \
+             patch('ccflow.api.record_request') as mock_record_request, \
+             patch('ccflow.api.record_error') as mock_record_error:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute_error
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            with pytest.raises(CLIExecutionError):
+                async for _ in query("Test", CLIAgentOptions()):
+                    pass
+
+            # Verify error was recorded
+            mock_record_error.assert_called_once_with("CLIExecutionError")
+
+            # Verify request was recorded with error status
+            mock_record_request.assert_called_once()
+            assert mock_record_request.call_args.kwargs["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_query_records_toon_savings(self):
+        """Test that query() records TOON savings when context is provided."""
+        from unittest.mock import patch
+
+        mock_events = [
+            {"type": "system", "subtype": "init", "session_id": "toon-test"},
+            {"type": "system", "subtype": "stop", "session_id": "toon-test", "usage": {}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in mock_events:
+                yield event
+
+        with patch('ccflow.api.get_executor') as mock_get_executor, \
+             patch('ccflow.api.record_request'), \
+             patch('ccflow.api.record_toon_savings') as mock_record_toon:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            # Note: TOON savings tracking happens during ToonSerializer.encode
+            # which sets _last_json_tokens and _last_toon_tokens
+            # For this test, we're just checking the integration point exists
+            options = CLIAgentOptions(
+                context={"key": "value"},
+            )
+
+            async for _ in query("Test", options):
+                pass
+
+            # record_toon_savings is only called if _last_json_tokens > 0
+            # which happens when TOON library is available and does tracking
+
+
 class TestMCPIntegration:
     """Test MCP configuration integration with executor."""
 

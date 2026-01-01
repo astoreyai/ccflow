@@ -14,6 +14,7 @@ from typing import AsyncIterator
 import structlog
 
 from ccflow.executor import CLIExecutor, get_executor
+from ccflow.metrics import record_error, record_request, record_toon_savings
 from ccflow.parser import StreamParser, collect_text
 from ccflow.toon_integration import ToonSerializer
 from ccflow.types import (
@@ -21,6 +22,7 @@ from ccflow.types import (
     InitMessage,
     Message,
     QueryResult,
+    ResultMessage,
     StopMessage,
 )
 
@@ -59,6 +61,13 @@ async def query(
         existing = opts.append_system_prompt or ""
         opts.append_system_prompt = existing + context_str
 
+        # Record TOON savings if tracking enabled
+        if opts.toon.track_savings and opts.toon._last_json_tokens > 0:
+            record_toon_savings(
+                opts.toon._last_json_tokens,
+                opts.toon._last_toon_tokens,
+            )
+
     # Build CLI flags
     flags = executor.build_flags(opts)
 
@@ -69,15 +78,47 @@ async def query(
         toon_enabled=opts.toon.enabled,
     )
 
-    # Execute and stream
-    async for event in executor.execute(
-        prompt,
-        flags,
-        timeout=opts.timeout,
-        cwd=opts.cwd,
-    ):
-        msg = parser.parse_event(event)
-        yield msg
+    # Metrics tracking
+    start_time = time.monotonic()
+    input_tokens = 0
+    output_tokens = 0
+    status = "success"
+
+    try:
+        # Execute and stream
+        async for event in executor.execute(
+            prompt,
+            flags,
+            timeout=opts.timeout,
+            cwd=opts.cwd,
+        ):
+            msg = parser.parse_event(event)
+
+            # Extract token counts from stop or result messages
+            if isinstance(msg, StopMessage):
+                input_tokens = msg.usage.get("input_tokens", 0)
+                output_tokens = msg.usage.get("output_tokens", 0)
+            elif isinstance(msg, ResultMessage):
+                input_tokens = msg.usage.get("input_tokens", input_tokens)
+                output_tokens = msg.usage.get("output_tokens", output_tokens)
+
+            yield msg
+
+    except Exception as e:
+        status = "error"
+        record_error(type(e).__name__)
+        raise
+
+    finally:
+        # Record request metrics
+        duration = time.monotonic() - start_time
+        record_request(
+            model=opts.model,
+            status=status,
+            duration=duration,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
 
 async def query_simple(
@@ -172,20 +213,38 @@ async def batch_query(
     )
 
     # Execute all prompts concurrently
+    batch_start = time.monotonic()
     tasks = [process_prompt(prompt, i) for i, prompt in enumerate(prompts)]
     results = await asyncio.gather(*tasks)
+    batch_duration = time.monotonic() - batch_start
 
     # Log summary
     successful = sum(1 for r in results if r.success)
+    failed = len(results) - successful
     total_tokens = sum(r.total_tokens for r in results)
-    total_duration = sum(r.duration_seconds for r in results)
+    total_input = sum(r.input_tokens for r in results)
+    total_output = sum(r.output_tokens for r in results)
+
+    # Record batch metrics (individual queries already recorded their own)
+    record_request(
+        model=opts.model,
+        status="success" if failed == 0 else "partial",
+        duration=batch_duration,
+        input_tokens=total_input,
+        output_tokens=total_output,
+    )
+
+    # Record errors for failed queries
+    for r in results:
+        if r.error:
+            record_error("BatchQueryError")
 
     logger.info(
         "batch_query_complete",
         successful=successful,
-        failed=len(results) - successful,
+        failed=failed,
         total_tokens=total_tokens,
-        total_duration=f"{total_duration:.2f}s",
+        total_duration=f"{batch_duration:.2f}s",
     )
 
     return list(results)
@@ -215,17 +274,24 @@ async def stream_to_callback(
     text_parts: list[str] = []
     input_tokens = 0
     output_tokens = 0
+    error: str | None = None
 
-    async for msg in query(prompt, opts):
-        callback(msg)
+    try:
+        async for msg in query(prompt, opts):
+            callback(msg)
 
-        if isinstance(msg, InitMessage):
-            session_id = msg.session_id
-        elif hasattr(msg, "content"):
-            text_parts.append(msg.content)
-        elif isinstance(msg, StopMessage):
-            input_tokens = msg.usage.get("input_tokens", 0)
-            output_tokens = msg.usage.get("output_tokens", 0)
+            if isinstance(msg, InitMessage):
+                session_id = msg.session_id
+            elif hasattr(msg, "content"):
+                text_parts.append(msg.content)
+            elif isinstance(msg, StopMessage):
+                input_tokens = msg.usage.get("input_tokens", 0)
+                output_tokens = msg.usage.get("output_tokens", 0)
+
+    except Exception as e:
+        error = str(e)
+        record_error(type(e).__name__)
+        logger.error("stream_to_callback_error", error=error)
 
     duration = time.monotonic() - start_time
 
@@ -236,4 +302,5 @@ async def stream_to_callback(
         output_tokens=output_tokens,
         duration_seconds=duration,
         toon_savings_ratio=opts.toon.last_compression_ratio,
+        error=error,
     )
