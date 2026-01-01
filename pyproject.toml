@@ -1,0 +1,161 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ccflow"
+version = "0.1.0"
+description = "Production middleware bridging Claude Code CLI with SDK-like Python interfaces"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Aaron Storey", email = "aaron@kymera.systems" }
+]
+keywords = [
+    "claude",
+    "anthropic",
+    "cli",
+    "sdk",
+    "middleware",
+    "llm",
+    "ai",
+    "toon",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "structlog>=23.0",
+]
+
+[project.optional-dependencies]
+toon = [
+    # Official TOON library (install from GitHub until PyPI release)
+    # "toon-format @ git+https://github.com/toon-format/toon-python.git",
+    "tiktoken>=0.5",  # For token counting
+]
+metrics = [
+    "prometheus-client>=0.17",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+]
+server = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+    "websockets>=11.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "pytest-timeout>=2.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+all = [
+    "ccflow[toon,metrics,server,dev]",
+]
+
+[project.scripts]
+ccflow = "ccflow.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/astoreyai/ccflow"
+Documentation = "https://github.com/astoreyai/ccflow#readme"
+Repository = "https://github.com/astoreyai/ccflow"
+Issues = "https://github.com/astoreyai/ccflow/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ccflow"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring actual CLI",
+]
+
+[tool.coverage.run]
+source = ["src/ccflow"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+fail_under = 80
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "B905",   # zip without explicit strict
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ccflow"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "toon_format.*",
+    "prometheus_client.*",
+    "tiktoken.*",
+]
+ignore_missing_imports = true

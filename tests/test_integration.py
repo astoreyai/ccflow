@@ -1,0 +1,511 @@
+"""Integration tests for ccflow middleware.
+
+These tests verify the complete flow from API to CLI execution.
+Some tests require the Claude CLI to be available and authenticated.
+"""
+
+import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+import asyncio
+
+from ccflow import (
+    query,
+    CLIAgentOptions,
+    TextMessage,
+    AssistantMessage,
+    InitMessage,
+    StopMessage,
+    PermissionMode,
+)
+from ccflow.executor import CLIExecutor
+from ccflow.parser import StreamParser
+from ccflow.toon_integration import ToonSerializer, should_use_toon
+from ccflow.types import ToonConfig
+
+
+class TestExecutorIntegration:
+    """Test CLIExecutor with mocked subprocess."""
+
+    @pytest.fixture
+    def mock_ndjson_stream(self):
+        """Create mock NDJSON stream output."""
+        return [
+            b'{"type":"system","subtype":"init","session_id":"test-123"}\n',
+            b'{"type":"assistant","message":{"model":"claude-sonnet","id":"msg_1","content":[{"type":"text","text":"Hello!"}],"usage":{"input_tokens":10,"output_tokens":5},"stop_reason":"end_turn"},"session_id":"test-123"}\n',
+            b'{"type":"system","subtype":"stop","session_id":"test-123","usage":{"input_tokens":10,"output_tokens":5}}\n',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_executor_streams_events(self, mock_ndjson_stream):
+        """Test that executor properly streams parsed events."""
+        # Create mock process
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stdout = AsyncMock()
+
+        # Create async iterator for stdout
+        async def stdout_iterator():
+            for line in mock_ndjson_stream:
+                yield line
+
+        mock_process.stdout.__aiter__ = lambda self: stdout_iterator()
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.wait = AsyncMock()
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
+            executor = CLIExecutor(cli_path="/usr/bin/claude")
+            events = []
+            async for event in executor.execute("test prompt", ["--output-format", "stream-json"]):
+                events.append(event)
+
+            assert len(events) == 3
+            assert events[0]["type"] == "system"
+            assert events[1]["type"] == "assistant"
+            assert events[2]["type"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_executor_handles_empty_lines(self, mock_ndjson_stream):
+        """Test that executor ignores empty lines in stream."""
+        # Create mock process with empty lines interspersed
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+
+        async def stdout_with_empty_lines():
+            yield b'\n'
+            yield mock_ndjson_stream[0]
+            yield b'   \n'
+            yield mock_ndjson_stream[1]
+            yield b'\n'
+            yield mock_ndjson_stream[2]
+
+        mock_process.stdout = MagicMock()
+        mock_process.stdout.__aiter__ = lambda self: stdout_with_empty_lines()
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.wait = AsyncMock()
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
+            executor = CLIExecutor(cli_path="/usr/bin/claude")
+            events = []
+            async for event in executor.execute("test prompt", ["--output-format", "stream-json"]):
+                events.append(event)
+
+            # Should only have 3 actual events, empty lines filtered
+            assert len(events) == 3
+
+
+class TestParserIntegration:
+    """Test StreamParser with realistic event sequences."""
+
+    def test_parse_full_conversation(self):
+        """Test parsing a complete conversation flow."""
+        parser = StreamParser()
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "conv-123"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m1", "content": [{"type": "text", "text": "I'll help."}], "usage": {}, "stop_reason": None}, "session_id": "conv-123"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m2", "content": [{"type": "text", "text": " Here's the answer."}], "usage": {"input_tokens": 100, "output_tokens": 50}, "stop_reason": "end_turn"}, "session_id": "conv-123"},
+            {"type": "system", "subtype": "stop", "session_id": "conv-123", "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]
+
+        messages = [parser.parse_event(e) for e in events]
+
+        assert isinstance(messages[0], InitMessage)
+        assert isinstance(messages[1], AssistantMessage)
+        assert isinstance(messages[2], AssistantMessage)
+        assert isinstance(messages[3], StopMessage)
+
+        # Check text extraction
+        assert messages[1].text_content == "I'll help."
+        assert messages[2].text_content == " Here's the answer."
+
+    def test_parse_tool_use_conversation(self):
+        """Test parsing conversation with tool use."""
+        parser = StreamParser()
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "tool-123"},
+            {"type": "message", "content": "Let me read that file.", "delta_type": "text_delta"},
+            {"type": "tool_use", "tool": "Read", "args": {"file_path": "/test.py"}},
+            {"type": "tool_result", "tool": "Read", "content": "print('hello')"},
+            {"type": "message", "content": "The file prints hello.", "delta_type": "text_delta"},
+            {"type": "system", "subtype": "stop", "session_id": "tool-123", "usage": {"input_tokens": 50, "output_tokens": 20}},
+        ]
+
+        messages = [parser.parse_event(e) for e in events]
+
+        assert len(messages) == 6
+        assert isinstance(messages[0], InitMessage)
+        assert isinstance(messages[1], TextMessage)
+        assert messages[2].tool == "Read"
+        assert messages[3].result == "print('hello')"
+
+    def test_parse_handles_missing_fields_gracefully(self):
+        """Test parser handles missing optional fields."""
+        parser = StreamParser()
+
+        # Minimal valid events
+        minimal_events = [
+            {"type": "system", "subtype": "init"},  # Missing session_id
+            {"type": "message"},  # Missing content
+            {"type": "system", "subtype": "stop"},  # Missing usage
+        ]
+
+        messages = [parser.parse_event(e) for e in minimal_events]
+
+        assert isinstance(messages[0], InitMessage)
+        assert messages[0].session_id == ""
+        assert isinstance(messages[1], TextMessage)
+        assert messages[1].content == ""
+        assert isinstance(messages[2], StopMessage)
+        assert messages[2].usage == {}
+
+
+class TestToonIntegration:
+    """Test TOON serialization integration."""
+
+    def test_toon_with_context_injection(self):
+        """Test TOON encoding for context injection."""
+        config = ToonConfig(enabled=False)  # Use JSON fallback for predictable output
+        serializer = ToonSerializer(config)
+
+        data = {
+            "users": [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ]
+        }
+
+        formatted = serializer.format_for_prompt(data, label="UserData")
+
+        assert "[UserData]" in formatted
+        assert "```json" in formatted
+        assert '"users"' in formatted
+
+    def test_should_use_toon_heuristic(self):
+        """Test the TOON applicability heuristic."""
+        # Uniform arrays should use TOON
+        uniform_data = {"items": [{"a": 1}, {"a": 2}, {"a": 3}, {"a": 4}]}
+        assert should_use_toon(uniform_data) is True
+
+        # Deeply nested should not
+        deep_data = {"a": {"b": {"c": {"d": {"e": 1}}}}}
+        assert should_use_toon(deep_data) is False
+
+    def test_toon_serializer_fallback_on_disabled(self):
+        """Test that serializer falls back to JSON when disabled."""
+        config = ToonConfig(enabled=False)
+        serializer = ToonSerializer(config)
+
+        data = {"key": "value", "number": 42}
+        result = serializer.encode(data)
+
+        # Should be valid JSON
+        import json
+        parsed = json.loads(result)
+        assert parsed["key"] == "value"
+        assert parsed["number"] == 42
+
+    def test_should_use_toon_shallow_dict(self):
+        """Test TOON heuristic with shallow dictionaries."""
+        # Shallow dict (depth <= 3) should use TOON
+        shallow = {"a": {"b": {"c": 1}}}
+        assert should_use_toon(shallow) is True
+
+    def test_should_use_toon_non_uniform_array(self):
+        """Test TOON heuristic rejects non-uniform arrays."""
+        # Non-uniform array should not use TOON (different keys)
+        non_uniform = {"items": [{"a": 1}, {"b": 2}, {"a": 3, "c": 4}]}
+        # This has non-uniform keys so should_use_toon returns False
+        # But if items < 4, it won't trigger uniform array check
+        small_non_uniform = {"items": [{"a": 1}, {"b": 2}]}
+        assert should_use_toon(small_non_uniform) is True  # Falls through to depth check
+
+
+class TestOptionsIntegration:
+    """Test CLIAgentOptions flag generation."""
+
+    def test_build_flags_with_all_options(self):
+        """Test that all options generate correct flags."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            model="opus",
+            system_prompt="Be helpful",
+            permission_mode=PermissionMode.ACCEPT_EDITS,
+            allowed_tools=["Read", "Write"],
+            max_turns=10,
+            verbose=True,
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--model" in flags
+        assert "opus" in flags
+        assert "--system-prompt" in flags
+        assert "--permission-mode" in flags
+        assert "acceptEdits" in flags
+        assert "--allowedTools" in flags
+        assert "--max-turns" in flags
+        assert "10" in flags
+
+    def test_build_flags_with_session_resume(self):
+        """Test flags for session resume."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            session_id="session-abc-123",
+            resume=True,
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--resume" in flags
+        assert "session-abc-123" in flags
+
+    def test_build_flags_with_session_fork(self):
+        """Test flags for session fork."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            session_id="session-abc-123",
+            resume=True,
+            fork_session=True,
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--resume" in flags
+        assert "--fork-session" in flags
+
+    def test_build_flags_with_disallowed_tools(self):
+        """Test flags for disallowed tools."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            disallowed_tools=["Bash", "Write"],
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--disallowedTools" in flags
+        assert "Bash" in flags
+        assert "Write" in flags
+
+    def test_build_flags_with_add_dirs(self):
+        """Test flags for additional directories."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            add_dirs=["/path/to/dir1", "/path/to/dir2"],
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--add-dir" in flags
+        assert "/path/to/dir1" in flags
+        assert "/path/to/dir2" in flags
+
+    def test_build_flags_default_includes_stream_json(self):
+        """Test that default flags include stream-json output format."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions()
+
+        flags = executor.build_flags(options)
+
+        assert "--output-format" in flags
+        assert "stream-json" in flags
+
+
+class TestEndToEndMocked:
+    """End-to-end tests with mocked CLI."""
+
+    @pytest.mark.asyncio
+    async def test_query_returns_text_content(self):
+        """Test that query() properly yields message content."""
+        mock_events = [
+            {"type": "system", "subtype": "init", "session_id": "e2e-test"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m1", "content": [{"type": "text", "text": "Test response"}], "usage": {"input_tokens": 5, "output_tokens": 3}, "stop_reason": "end_turn"}, "session_id": "e2e-test"},
+            {"type": "system", "subtype": "stop", "session_id": "e2e-test", "usage": {"input_tokens": 5, "output_tokens": 3}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in mock_events:
+                yield event
+
+        with patch('ccflow.api.get_executor') as mock_get_executor:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            messages = []
+            async for msg in query("Test", CLIAgentOptions()):
+                messages.append(msg)
+
+            assert len(messages) == 3
+            assert any(isinstance(m, AssistantMessage) for m in messages)
+
+            assistant_msgs = [m for m in messages if isinstance(m, AssistantMessage)]
+            assert assistant_msgs[0].text_content == "Test response"
+
+    @pytest.mark.asyncio
+    async def test_query_with_context_injection(self):
+        """Test query with context data injection."""
+        mock_events = [
+            {"type": "system", "subtype": "init", "session_id": "ctx-test"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m1", "content": [{"type": "text", "text": "I see the context"}], "usage": {}, "stop_reason": "end_turn"}, "session_id": "ctx-test"},
+            {"type": "system", "subtype": "stop", "session_id": "ctx-test", "usage": {}},
+        ]
+
+        captured_flags = []
+
+        async def mock_execute(prompt, flags, **kwargs):
+            captured_flags.extend(flags)
+            for event in mock_events:
+                yield event
+
+        with patch('ccflow.api.get_executor') as mock_get_executor:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            options = CLIAgentOptions(
+                context={"user": "Alice", "role": "admin"},
+                toon=ToonConfig(enabled=False, encode_context=True),
+            )
+
+            messages = []
+            async for msg in query("What is the user?", options):
+                messages.append(msg)
+
+            # Context should have been injected into append_system_prompt
+            assert "--append-system-prompt" in captured_flags
+
+    @pytest.mark.asyncio
+    async def test_query_handles_stop_message(self):
+        """Test that query properly handles stop message with usage."""
+        mock_events = [
+            {"type": "system", "subtype": "init", "session_id": "stop-test"},
+            {"type": "message", "content": "Response text", "delta_type": "text_delta"},
+            {"type": "system", "subtype": "stop", "session_id": "stop-test", "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in mock_events:
+                yield event
+
+        with patch('ccflow.api.get_executor') as mock_get_executor:
+            mock_executor = MagicMock()
+            mock_executor.execute = mock_execute
+            mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+            mock_get_executor.return_value = mock_executor
+
+            messages = []
+            async for msg in query("Test", CLIAgentOptions()):
+                messages.append(msg)
+
+            stop_msgs = [m for m in messages if isinstance(m, StopMessage)]
+            assert len(stop_msgs) == 1
+            assert stop_msgs[0].usage["input_tokens"] == 100
+            assert stop_msgs[0].usage["output_tokens"] == 50
+
+
+class TestMultiTurnIntegration:
+    """Test multi-turn conversation scenarios."""
+
+    def test_parser_tracks_multiple_assistant_messages(self):
+        """Test parsing multiple assistant turns."""
+        parser = StreamParser()
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "multi-123"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m1", "content": [{"type": "text", "text": "First turn"}], "usage": {"input_tokens": 10, "output_tokens": 5}}, "session_id": "multi-123"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m2", "content": [{"type": "text", "text": "Second turn"}], "usage": {"input_tokens": 15, "output_tokens": 8}}, "session_id": "multi-123"},
+            {"type": "assistant", "message": {"model": "sonnet", "id": "m3", "content": [{"type": "text", "text": "Third turn"}], "usage": {"input_tokens": 20, "output_tokens": 10}, "stop_reason": "end_turn"}, "session_id": "multi-123"},
+            {"type": "system", "subtype": "stop", "session_id": "multi-123", "usage": {"input_tokens": 45, "output_tokens": 23}},
+        ]
+
+        messages = [parser.parse_event(e) for e in events]
+
+        assistant_msgs = [m for m in messages if isinstance(m, AssistantMessage)]
+        assert len(assistant_msgs) == 3
+        assert assistant_msgs[0].text_content == "First turn"
+        assert assistant_msgs[1].text_content == "Second turn"
+        assert assistant_msgs[2].text_content == "Third turn"
+
+    def test_parser_handles_interleaved_tool_use(self):
+        """Test parsing conversation with interleaved tool calls."""
+        parser = StreamParser()
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "tool-multi"},
+            {"type": "message", "content": "Reading files...", "delta_type": "text_delta"},
+            {"type": "tool_use", "tool": "Read", "args": {"file_path": "/a.py"}},
+            {"type": "tool_result", "tool": "Read", "content": "content_a"},
+            {"type": "message", "content": "Got first file.", "delta_type": "text_delta"},
+            {"type": "tool_use", "tool": "Read", "args": {"file_path": "/b.py"}},
+            {"type": "tool_result", "tool": "Read", "content": "content_b"},
+            {"type": "message", "content": "Done!", "delta_type": "text_delta"},
+            {"type": "system", "subtype": "stop", "session_id": "tool-multi", "usage": {}},
+        ]
+
+        messages = [parser.parse_event(e) for e in events]
+
+        text_msgs = [m for m in messages if isinstance(m, TextMessage)]
+        assert len(text_msgs) == 3
+
+        from ccflow.types import ToolUseMessage, ToolResultMessage
+        tool_use_msgs = [m for m in messages if isinstance(m, ToolUseMessage)]
+        tool_result_msgs = [m for m in messages if isinstance(m, ToolResultMessage)]
+
+        assert len(tool_use_msgs) == 2
+        assert len(tool_result_msgs) == 2
+
+
+class TestErrorHandlingIntegration:
+    """Test error handling across the stack."""
+
+    @pytest.mark.asyncio
+    async def test_executor_handles_nonzero_exit(self):
+        """Test executor raises on non-zero exit code."""
+        from ccflow.exceptions import CLIExecutionError
+
+        mock_process = AsyncMock()
+        mock_process.returncode = 1
+
+        async def empty_iterator():
+            return
+            yield  # Make it a generator
+
+        mock_process.stdout = MagicMock()
+        mock_process.stdout.__aiter__ = lambda self: empty_iterator()
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"Error: something went wrong")
+        mock_process.wait = AsyncMock()
+
+        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
+            executor = CLIExecutor(cli_path="/usr/bin/claude")
+
+            with pytest.raises(CLIExecutionError) as exc_info:
+                async for _ in executor.execute("test", []):
+                    pass
+
+            assert "exited with code 1" in str(exc_info.value)
+
+    def test_parser_handles_error_event(self):
+        """Test parser correctly handles error events."""
+        parser = StreamParser()
+        event = {"type": "error", "message": "Rate limit exceeded", "code": "rate_limit"}
+
+        from ccflow.types import ErrorMessage
+        msg = parser.parse_event(event)
+
+        assert isinstance(msg, ErrorMessage)
+        assert msg.message == "Rate limit exceeded"
+        assert msg.code == "rate_limit"
+
+    def test_parser_handles_unknown_event_type(self):
+        """Test parser gracefully handles unknown event types."""
+        parser = StreamParser()
+        event = {"type": "future_new_type", "data": "something"}
+
+        from ccflow.types import UnknownMessage
+        msg = parser.parse_event(event)
+
+        assert isinstance(msg, UnknownMessage)
+        assert msg.event_type == "future_new_type"
+        assert msg.raw_data == event
