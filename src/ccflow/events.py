@@ -464,22 +464,16 @@ class MetricsHandler:
 class CostTracker:
     """Event handler that tracks costs per session.
 
+    Uses the pricing module for accurate cost calculation with
+    current Anthropic pricing for all model tiers.
+
     Example:
         >>> tracker = CostTracker()
         >>> emitter.add_handler(tracker)
         >>> # Later:
         >>> print(tracker.get_session_cost("session-123"))
+        >>> print(tracker.get_session_tokens("session-123"))
     """
-
-    # Approximate costs per 1M tokens (as of 2024)
-    COSTS_PER_MILLION = {
-        "sonnet": {"input": 3.0, "output": 15.0},
-        "opus": {"input": 15.0, "output": 75.0},
-        "haiku": {"input": 0.25, "output": 1.25},
-        "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
-        "claude-3-opus-20240229": {"input": 15.0, "output": 75.0},
-        "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
-    }
 
     def __init__(self) -> None:
         """Initialize cost tracker."""
@@ -498,6 +492,18 @@ class CostTracker:
         """Get total cost across all sessions."""
         return sum(self._session_costs.values())
 
+    def get_all_sessions(self) -> dict[str, dict[str, float | dict]]:
+        """Get all session costs and tokens."""
+        result = {}
+        for session_id in self._session_costs:
+            result[session_id] = {
+                "cost": self._session_costs.get(session_id, 0.0),
+                "tokens": self._session_tokens.get(
+                    session_id, {"input": 0, "output": 0}
+                ),
+            }
+        return result
+
     def clear(self) -> None:
         """Clear all tracked costs."""
         self._session_costs.clear()
@@ -509,22 +515,13 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
     ) -> float:
-        """Calculate cost for token usage."""
-        # Normalize model name
-        model_key = model.lower()
-        for key in self.COSTS_PER_MILLION:
-            if key in model_key or model_key in key:
-                costs = self.COSTS_PER_MILLION[key]
-                return (
-                    (input_tokens / 1_000_000) * costs["input"]
-                    + (output_tokens / 1_000_000) * costs["output"]
-                )
+        """Calculate cost for token usage using pricing module."""
+        from ccflow.pricing import calculate_cost
 
-        # Default to sonnet pricing if unknown
-        costs = self.COSTS_PER_MILLION["sonnet"]
-        return (
-            (input_tokens / 1_000_000) * costs["input"]
-            + (output_tokens / 1_000_000) * costs["output"]
+        return calculate_cost(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     def __call__(self, event: Event) -> None:

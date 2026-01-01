@@ -87,6 +87,30 @@ from ccflow.exceptions import (
     SessionStoreError,
     ToonEncodingError,
 )
+from ccflow.pool import (
+    PoolConfig,
+    PoolStats,
+    PoolTask,
+    ProcessPool,
+    StreamingPool,
+    StreamingTask,
+    TaskStatus,
+    get_pool,
+    get_streaming_pool,
+    reset_pools,
+)
+from ccflow.pricing import (
+    ModelPricing,
+    ModelTier,
+    UsageStats,
+    calculate_cost,
+    extract_model_from_events,
+    extract_usage_from_events,
+    get_pricing,
+    get_usage_tracker,
+    reset_usage_tracker,
+    track_usage,
+)
 from ccflow.session import Session, load_session, resume_session
 from ccflow.store import (
     BaseSessionStore,
@@ -231,4 +255,26 @@ __all__ = [
     "ParseError",
     "ToonEncodingError",
     "PermissionDeniedError",
+    # Process Pool
+    "ProcessPool",
+    "StreamingPool",
+    "PoolConfig",
+    "PoolStats",
+    "PoolTask",
+    "StreamingTask",
+    "TaskStatus",
+    "get_pool",
+    "get_streaming_pool",
+    "reset_pools",
+    # Pricing and Usage
+    "ModelPricing",
+    "ModelTier",
+    "UsageStats",
+    "calculate_cost",
+    "get_pricing",
+    "extract_usage_from_events",
+    "extract_model_from_events",
+    "get_usage_tracker",
+    "reset_usage_tracker",
+    "track_usage",
 ]

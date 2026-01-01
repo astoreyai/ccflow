@@ -756,8 +756,8 @@ class TestCostTracker:
         assert abs(cost - 90.0) < 0.01  # $15 + $75
 
     def test_cost_calculation_haiku(self, tracker: CostTracker):
-        """Test cost calculation for Haiku model."""
-        # 1M input tokens = $0.25, 1M output tokens = $1.25
+        """Test cost calculation for Haiku model (Claude 3.5 Haiku)."""
+        # 1M input tokens = $0.80, 1M output tokens = $4.00
         tracker(TokensUsedEvent(
             session_id="test-123",
             input_tokens=1_000_000,
@@ -766,7 +766,7 @@ class TestCostTracker:
         ))
 
         cost = tracker.get_session_cost("test-123")
-        assert abs(cost - 1.5) < 0.01  # $0.25 + $1.25
+        assert abs(cost - 4.8) < 0.01  # $0.80 + $4.00
 
     def test_cost_calculation_unknown_model(self, tracker: CostTracker):
         """Test cost calculation defaults to Sonnet for unknown model."""
