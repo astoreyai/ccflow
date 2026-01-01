@@ -51,10 +51,10 @@ Examples:
     )
 
     parser.add_argument(
-        "--max-turns",
-        type=int,
+        "--max-budget",
+        type=float,
         default=None,
-        help="Maximum agentic turns",
+        help="Maximum budget in USD",
     )
 
     parser.add_argument(
@@ -66,8 +66,8 @@ Examples:
 
     parser.add_argument(
         "--permission-mode",
-        choices=["plan", "ask", "acceptEdits", "bypass"],
-        default="ask",
+        choices=["default", "plan", "dontAsk", "acceptEdits", "delegate", "bypass"],
+        default="default",
         help="Permission mode for tool execution",
     )
 
@@ -101,12 +101,14 @@ Examples:
 def get_permission_mode(mode_str: str) -> PermissionMode:
     """Convert string to PermissionMode enum."""
     mapping = {
+        "default": PermissionMode.DEFAULT,
         "plan": PermissionMode.PLAN,
-        "ask": PermissionMode.ASK,
+        "dontAsk": PermissionMode.DONT_ASK,
         "acceptEdits": PermissionMode.ACCEPT_EDITS,
+        "delegate": PermissionMode.DELEGATE,
         "bypass": PermissionMode.BYPASS,
     }
-    return mapping.get(mode_str, PermissionMode.ASK)
+    return mapping.get(mode_str, PermissionMode.DEFAULT)
 
 
 async def run_query(args: argparse.Namespace) -> int:
@@ -127,7 +129,7 @@ async def run_query(args: argparse.Namespace) -> int:
 
     options = CLIAgentOptions(
         model=args.model or settings.default_model,
-        max_turns=args.max_turns or settings.default_max_turns,
+        max_budget_usd=args.max_budget,
         timeout=args.timeout or settings.default_timeout,
         permission_mode=get_permission_mode(args.permission_mode),
         allowed_tools=args.allowed_tools,
