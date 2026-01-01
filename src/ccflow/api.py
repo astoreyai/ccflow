@@ -59,6 +59,13 @@ async def query(
     parser = StreamParser()
     toon = ToonSerializer(opts.toon)
 
+    # Apply ultrathink prefix if enabled
+    effective_prompt = prompt
+    if opts.ultrathink:
+        # Prepend "ultrathink" to trigger extended thinking mode
+        effective_prompt = f"ultrathink {prompt}"
+        logger.debug("ultrathink_enabled", original_prompt_len=len(prompt))
+
     # Inject TOON-encoded context if provided
     if opts.context and opts.toon.encode_context:
         context_str = toon.format_for_prompt(opts.context, label="Context")
@@ -91,7 +98,7 @@ async def query(
     try:
         # Execute and stream
         async for event in executor.execute(
-            prompt,
+            effective_prompt,
             flags,
             timeout=opts.timeout,
             cwd=opts.cwd,

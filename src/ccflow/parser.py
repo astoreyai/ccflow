@@ -21,6 +21,7 @@ from ccflow.types import (
     ResultMessage,
     StopMessage,
     TextMessage,
+    ThinkingMessage,
     ToolResultMessage,
     ToolUseMessage,
     UnknownMessage,
@@ -74,6 +75,8 @@ class StreamParser:
             return self._parse_result_event(event)
         elif event_type == "error":
             return self._parse_error_event(event)
+        elif event_type == "thinking":
+            return self._parse_thinking_event(event)
         else:
             # Handle unknown event types gracefully for forward compatibility
             logger.debug("unknown_event_type", event_type=event_type, raw_event=event)
@@ -185,6 +188,20 @@ class StreamParser:
             is_error=is_error,
         )
 
+    def _parse_thinking_event(self, event: dict[str, Any]) -> ThinkingMessage:
+        """Parse thinking/reasoning event from extended thinking mode.
+
+        Thinking events contain the model's internal reasoning process
+        when ultrathink mode is enabled.
+        """
+        content = event.get("content", event.get("thinking", ""))
+        thinking_tokens = event.get("thinking_tokens", 0)
+
+        return ThinkingMessage(
+            content=content,
+            thinking_tokens=thinking_tokens,
+        )
+
 
 # Convenience functions
 
@@ -249,3 +266,59 @@ def collect_text(messages: list[Message]) -> str:
         if isinstance(msg, TextMessage):
             parts.append(msg.content)
     return "".join(parts)
+
+
+def collect_thinking(messages: list[Message]) -> str:
+    """Collect all thinking content from messages.
+
+    Args:
+        messages: List of Message objects
+
+    Returns:
+        Concatenated thinking content
+    """
+    parts: list[str] = []
+    for msg in messages:
+        if isinstance(msg, ThinkingMessage):
+            parts.append(msg.content)
+    return "".join(parts)
+
+
+def extract_thinking_from_assistant(msg: AssistantMessage) -> str:
+    """Extract thinking content from AssistantMessage content blocks.
+
+    Thinking content may be embedded in the content array as blocks
+    with type "thinking".
+
+    Args:
+        msg: AssistantMessage to extract thinking from
+
+    Returns:
+        Concatenated thinking content from content blocks
+    """
+    parts: list[str] = []
+    for block in msg.content:
+        if block.get("type") == "thinking":
+            parts.append(block.get("thinking", ""))
+    return "".join(parts)
+
+
+def extract_thinking_tokens(events: list[dict[str, Any]]) -> int:
+    """Extract thinking token count from events.
+
+    Args:
+        events: List of raw JSON events
+
+    Returns:
+        Total thinking tokens used
+    """
+    total = 0
+    for event in events:
+        # Check for thinking events
+        if event.get("type") == "thinking":
+            total += event.get("thinking_tokens", 0)
+        # Check for usage in stop/result events
+        elif (event.get("type") == "system" and event.get("subtype") == "stop") or event.get("type") == "result":
+            usage = event.get("usage", {})
+            total += usage.get("thinking_tokens", 0)
+    return total

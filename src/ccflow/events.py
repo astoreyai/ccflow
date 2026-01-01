@@ -32,6 +32,7 @@ class EventType(str, Enum):
     TURN_STARTED = "turn.started"
     TURN_COMPLETED = "turn.completed"
     MESSAGE_RECEIVED = "message.received"
+    THINKING_RECEIVED = "thinking.received"
 
     # Tool events
     TOOL_CALLED = "tool.called"
@@ -124,6 +125,7 @@ class TurnCompletedEvent(TurnEvent):
     response: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0  # Extended thinking tokens used
     duration_seconds: float = 0.0
 
 
@@ -134,6 +136,15 @@ class MessageEvent(Event):
     type: EventType = field(default=EventType.MESSAGE_RECEIVED)
     message_type: str = ""
     content: str = ""
+
+
+@dataclass
+class ThinkingReceivedEvent(Event):
+    """Event for extended thinking content."""
+
+    type: EventType = field(default=EventType.THINKING_RECEIVED)
+    content: str = ""
+    thinking_tokens: int = 0
 
 
 @dataclass
@@ -169,6 +180,7 @@ class TokensUsedEvent(Event):
     type: EventType = field(default=EventType.TOKENS_USED)
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0  # Extended thinking tokens used
     model: str = ""
 
 
@@ -181,6 +193,7 @@ class CostIncurredEvent(Event):
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0  # Extended thinking tokens used
 
 
 @dataclass

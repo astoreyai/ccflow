@@ -141,6 +141,7 @@ class CLIAgentOptions:
         settings: Path to settings JSON or JSON string
         plugin_dirs: Directories to load plugins from
         disable_slash_commands: Disable all slash commands
+        ultrathink: Enable extended thinking mode (prepends "ultrathink" to prompt)
     """
 
     # Model selection
@@ -219,6 +220,9 @@ class CLIAgentOptions:
     # Slash commands
     disable_slash_commands: bool = False
 
+    # Extended thinking
+    ultrathink: bool = False  # Enable extended thinking mode
+
 
 # Message types matching CLI stream-json output
 
@@ -239,6 +243,19 @@ class TextMessage:
     content: str
     type: Literal["message"] = "message"
     delta_type: Literal["text_delta"] = "text_delta"
+
+
+@dataclass
+class ThinkingMessage:
+    """Extended thinking content from assistant.
+
+    Represents the internal reasoning process when ultrathink mode is enabled.
+    Contains the model's chain-of-thought reasoning before generating the response.
+    """
+
+    content: str
+    thinking_tokens: int = 0  # Tokens used for thinking
+    type: Literal["thinking"] = "thinking"
 
 
 @dataclass
@@ -367,6 +384,7 @@ class ResultMessage:
 Message = (
     InitMessage
     | TextMessage
+    | ThinkingMessage
     | ToolUseMessage
     | ToolResultMessage
     | ErrorMessage

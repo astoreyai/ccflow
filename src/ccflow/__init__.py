@@ -41,6 +41,7 @@ from ccflow.events import (
     SessionLoadedEvent,
     SessionPersistedEvent,
     SessionResumedEvent,
+    ThinkingReceivedEvent,
     TokensUsedEvent,
     ToolCalledEvent,
     ToolResultEvent,
@@ -66,6 +67,12 @@ from ccflow.metrics_handlers import (
     PrometheusEventHandler,
     setup_metrics,
     start_metrics_server,
+)
+from ccflow.parser import (
+    collect_text,
+    collect_thinking,
+    extract_thinking_from_assistant,
+    extract_thinking_tokens,
 )
 from ccflow.pool import (
     PoolConfig,
@@ -148,6 +155,7 @@ from ccflow.types import (
     SessionStats,
     StopMessage,
     TextMessage,
+    ThinkingMessage,
     ToolResultMessage,
     ToolUseMessage,
     ToonConfig,
@@ -251,6 +259,8 @@ __all__ = [
     "StreamingTask",
     "TaskStatus",
     "TextMessage",
+    "ThinkingMessage",
+    "ThinkingReceivedEvent",
     # Rate Limiting
     "TokenBucketRateLimiter",
     "TokensUsedEvent",
@@ -270,7 +280,12 @@ __all__ = [
     "bind_correlation_id",
     "calculate_cost",
     "calculate_delay",
+    # Parser helpers
+    "collect_text",
+    "collect_thinking",
     "extract_model_from_events",
+    "extract_thinking_from_assistant",
+    "extract_thinking_tokens",
     "extract_usage_from_events",
     "get_api_client",
     "get_cli_circuit_breaker",

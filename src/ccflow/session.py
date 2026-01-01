@@ -270,7 +270,14 @@ class Session:
             toon=self._options.toon,
             verbose=self._options.verbose,
             include_partial=self._options.include_partial,
+            ultrathink=self._options.ultrathink,
         )
+
+        # Apply ultrathink prefix if enabled
+        effective_content = content
+        if self._options.ultrathink:
+            effective_content = f"ultrathink {content}"
+            logger.debug("ultrathink_enabled", turn=self._turn_count)
 
         # Inject context if provided
         if context and self._options.toon.encode_context:
@@ -283,7 +290,7 @@ class Session:
 
         # Execute and stream
         async for event in self._executor.execute(
-            content,
+            effective_content,
             flags,
             timeout=self._options.timeout,
             cwd=self._options.cwd,
