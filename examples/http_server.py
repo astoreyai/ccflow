@@ -31,18 +31,13 @@ async def demo_server_setup():
 
     # Create server with configuration
     server = CCFlowServer(
-        host="0.0.0.0",
-        port=8080,
-        default_options=CLIAgentOptions(
-            model="sonnet",
-            allowed_tools=["Read", "Grep", "Glob"],
-        ),
+        cors_origins=["*"],
+        enable_metrics=True,
     )
 
-    print(f"  Server configured:")
-    print(f"    Host: {server._host}")
-    print(f"    Port: {server._port}")
-    print(f"    Default model: {server._default_options.model}")
+    print("  Server configured:")
+    print("    CORS: ['*']")
+    print("    Metrics: enabled")
 
     # Get FastAPI app for customization
     app = server.app
@@ -157,14 +152,10 @@ def run_server():
     print("Starting ccflow HTTP Server...")
     print("=" * 60)
 
-    server = CCFlowServer(
-        host="0.0.0.0",
-        port=8080,
-        default_options=CLIAgentOptions(model="sonnet"),
-    )
+    server = CCFlowServer()
 
-    # Start server (blocking)
-    asyncio.run(server.start())
+    # Start server with uvicorn (blocking)
+    uvicorn.run(server.app, host="0.0.0.0", port=8080)
 
 
 async def main():

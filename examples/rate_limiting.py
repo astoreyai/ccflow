@@ -9,7 +9,7 @@ and prevent overloading Claude.
 import asyncio
 import time
 
-from ccflow import query_simple, CLIAgentOptions
+from ccflow import query, CLIAgentOptions  # noqa: F401 - shown in comments
 from ccflow.rate_limiting import (
     TokenBucketRateLimiter,
     SlidingWindowRateLimiter,
@@ -25,13 +25,13 @@ async def demo_token_bucket():
     print("\n1. Token Bucket Rate Limiter")
     print("-" * 40)
 
-    # 2 requests per second, burst of 3
-    limiter = TokenBucketRateLimiter(rate=2.0, burst=3)
+    # 120 requests per minute (2/sec), burst of 3
+    limiter = TokenBucketRateLimiter(rate=120.0, burst=3)
 
     async def make_request(i: int):
-        async with limiter.acquire():
-            print(f"  Request {i}: acquired at {time.time():.2f}")
-            await asyncio.sleep(0.1)  # Simulate work
+        wait_time = await limiter.acquire()
+        print(f"  Request {i}: acquired at {time.time():.2f} (waited {wait_time:.2f}s)")
+        await asyncio.sleep(0.1)  # Simulate work
 
     # First 3 should go immediately (burst), then rate-limited
     start = time.time()
@@ -47,21 +47,20 @@ async def demo_sliding_window():
     print("-" * 40)
 
     # 5 requests per 2-second window
-    limiter = SlidingWindowRateLimiter(rate=5.0, window=2.0)
+    limiter = SlidingWindowRateLimiter(rate=5, window=2.0)
 
-    stats = limiter.get_stats()
-    print(f"  Initial stats: {stats}")
+    print(f"  Initial count: {limiter.current_count}")
 
     async def make_request(i: int):
-        async with limiter.acquire():
-            print(f"  Request {i}: acquired at {time.time():.2f}")
+        wait_time = await limiter.acquire()
+        print(f"  Request {i}: acquired at {time.time():.2f} (waited {wait_time:.2f}s)")
 
     start = time.time()
     for i in range(6):
         await make_request(i)
 
     print(f"  Total time: {time.time() - start:.2f}s")
-    print(f"  Final stats: {limiter.get_stats()}")
+    print(f"  Final count: {limiter.current_count}")
 
 
 async def demo_concurrency_limiter():
@@ -89,8 +88,8 @@ async def demo_combined_limiter():
     print("\n4. Combined Limiter (Rate + Concurrency)")
     print("-" * 40)
 
-    # 4 requests/second, max 2 concurrent
-    limiter = CombinedLimiter(rate=4.0, max_concurrent=2)
+    # 240 requests/minute (4/sec), max 2 concurrent
+    limiter = CombinedLimiter(rate=240.0, max_concurrent=2)
 
     async def make_request(i: int):
         async with limiter.acquire():
@@ -100,7 +99,7 @@ async def demo_combined_limiter():
     start = time.time()
     await asyncio.gather(*[make_request(i) for i in range(4)])
     print(f"  Total time: {time.time() - start:.2f}s")
-    print(f"  Stats: {limiter.get_stats()}")
+    print(f"  Stats: {limiter.stats}")
 
 
 async def demo_with_ccflow():
@@ -108,8 +107,8 @@ async def demo_with_ccflow():
     print("\n5. Rate Limiting with ccflow Queries")
     print("-" * 40)
 
-    # Configure a strict limiter for demo
-    limiter = CombinedLimiter(rate=2.0, max_concurrent=1)
+    # Configure a strict limiter for demo (120/min = 2/sec)
+    limiter = CombinedLimiter(rate=120.0, max_concurrent=1)
 
     questions = [
         "What is 2+2?",
@@ -121,7 +120,7 @@ async def demo_with_ccflow():
         async with limiter.acquire():
             print(f"  Querying: {q[:20]}...")
             # In real usage, you'd call query() here
-            # response = await query_simple(q)
+            # response = await query(q)
             await asyncio.sleep(0.2)  # Simulated
             return f"Answer to: {q}"
 
@@ -135,17 +134,17 @@ async def demo_rate_limit_exceeded():
     print("\n6. Handling Rate Limit Exceeded")
     print("-" * 40)
 
-    # Strict limiter with no wait
-    limiter = TokenBucketRateLimiter(rate=1.0, burst=1, wait_timeout=0.0)
+    # Strict limiter with no wait (60/min = 1/sec)
+    limiter = TokenBucketRateLimiter(rate=60.0, burst=1, wait_timeout=0.0)
 
     # First request succeeds
-    async with limiter.acquire():
-        print("  First request: success")
+    await limiter.acquire()
+    print("  First request: success")
 
     # Second request fails immediately (no waiting)
     try:
-        async with limiter.acquire():
-            print("  Second request: success")
+        await limiter.acquire()
+        print("  Second request: success")
     except RateLimitExceededError as e:
         print(f"  Second request: rate limited (wait {e.retry_after:.2f}s)")
 

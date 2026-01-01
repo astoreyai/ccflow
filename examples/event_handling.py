@@ -39,8 +39,8 @@ class MetricsCollector:
         print(f"  [Metrics] Tokens: +{event.input_tokens + event.output_tokens} (total: {self.total_tokens})")
 
     def on_cost(self, event: CostIncurredEvent):
-        self.total_cost += event.cost_usd
-        print(f"  [Metrics] Cost: +${event.cost_usd:.4f} (total: ${self.total_cost:.4f})")
+        self.total_cost += event.amount_usd
+        print(f"  [Metrics] Cost: +${event.amount_usd:.4f} (total: ${self.total_cost:.4f})")
 
     def on_session_created(self, event: SessionCreatedEvent):
         self.sessions_created += 1
@@ -48,7 +48,7 @@ class MetricsCollector:
 
     def on_turn_completed(self, event: TurnCompletedEvent):
         self.turns_completed += 1
-        print(f"  [Metrics] Turn {event.turn_number} completed in {event.duration_ms}ms")
+        print(f"  [Metrics] Turn {event.turn_number} completed in {event.duration_seconds:.2f}s")
 
     def on_tool_called(self, event: ToolCalledEvent):
         self.tool_calls.append(event.tool)
@@ -84,7 +84,7 @@ async def demo_basic_events():
         print(f"  Tokens used: {total}")
 
     # Subscribe to event
-    emitter.on(EventType.TOKENS_USED, on_tokens)
+    emitter.add_handler(on_tokens, EventType.TOKENS_USED)
 
     # Emit test event
     await emitter.emit(TokensUsedEvent(
@@ -94,7 +94,7 @@ async def demo_basic_events():
     ))
 
     # Unsubscribe
-    emitter.off(EventType.TOKENS_USED, on_tokens)
+    emitter.remove_handler(on_tokens, EventType.TOKENS_USED)
 
 
 async def demo_multiple_handlers():
@@ -117,8 +117,8 @@ async def demo_multiple_handlers():
         handler2_called = True
         print("  Handler 2: received event")
 
-    emitter.on(EventType.SESSION_CREATED, handler1)
-    emitter.on(EventType.SESSION_CREATED, handler2)
+    emitter.add_handler(handler1, EventType.SESSION_CREATED)
+    emitter.add_handler(handler2, EventType.SESSION_CREATED)
 
     await emitter.emit(SessionCreatedEvent(
         session_id="test-123",
@@ -142,7 +142,7 @@ async def demo_async_handlers():
         await asyncio.sleep(0.1)  # Simulate async work
         print("  Async handler: finished processing")
 
-    emitter.on(EventType.SESSION_CLOSED, async_handler)
+    emitter.add_handler(async_handler, EventType.SESSION_CLOSED)
 
     await emitter.emit(SessionClosedEvent(
         session_id="test-456",
@@ -160,11 +160,11 @@ async def demo_metrics_collector():
     collector = MetricsCollector()
 
     # Register all handlers
-    emitter.on(EventType.TOKENS_USED, collector.on_tokens)
-    emitter.on(EventType.COST_INCURRED, collector.on_cost)
-    emitter.on(EventType.SESSION_CREATED, collector.on_session_created)
-    emitter.on(EventType.TURN_COMPLETED, collector.on_turn_completed)
-    emitter.on(EventType.TOOL_CALLED, collector.on_tool_called)
+    emitter.add_handler(collector.on_tokens, EventType.TOKENS_USED)
+    emitter.add_handler(collector.on_cost, EventType.COST_INCURRED)
+    emitter.add_handler(collector.on_session_created, EventType.SESSION_CREATED)
+    emitter.add_handler(collector.on_turn_completed, EventType.TURN_COMPLETED)
+    emitter.add_handler(collector.on_tool_called, EventType.TOOL_CALLED)
 
     # Simulate session lifecycle
     await emitter.emit(SessionCreatedEvent(
@@ -186,7 +186,7 @@ async def demo_metrics_collector():
     ))
 
     await emitter.emit(CostIncurredEvent(
-        cost_usd=0.0045,
+        amount_usd=0.0045,
         model="sonnet",
         input_tokens=50,
         output_tokens=100,
@@ -197,7 +197,7 @@ async def demo_metrics_collector():
         turn_number=1,
         input_tokens=50,
         output_tokens=100,
-        duration_ms=1500,
+        duration_seconds=1.5,
     ))
 
     print(f"\n  Final metrics:")
@@ -217,7 +217,7 @@ async def demo_audit_logging():
 
     # Subscribe to all event types
     for event_type in EventType:
-        emitter.on(event_type, audit.on_session_event)
+        emitter.add_handler(audit.on_session_event, event_type)
 
     # Emit various events
     await emitter.emit(SessionCreatedEvent(
@@ -250,16 +250,16 @@ async def demo_event_filtering():
     high_cost_alerts = []
 
     def cost_alert_handler(event: CostIncurredEvent):
-        if event.cost_usd > 0.01:
+        if event.amount_usd > 0.01:
             high_cost_alerts.append(event)
-            print(f"  ALERT: High cost ${event.cost_usd:.4f} for {event.model}")
+            print(f"  ALERT: High cost ${event.amount_usd:.4f} for {event.model}")
 
-    emitter.on(EventType.COST_INCURRED, cost_alert_handler)
+    emitter.add_handler(cost_alert_handler, EventType.COST_INCURRED)
 
     # Emit costs - some will trigger alert
     for cost in [0.005, 0.015, 0.002, 0.025]:
         await emitter.emit(CostIncurredEvent(
-            cost_usd=cost,
+            amount_usd=cost,
             model="sonnet",
             input_tokens=100,
             output_tokens=200,

@@ -73,8 +73,7 @@ async def demo_circuit_breaker():
     except CircuitBreakerError:
         print("  Still rejected")
 
-    stats = breaker.get_stats()
-    print(f"\n  Final stats: {stats}")
+    print(f"\n  Final stats: {breaker.stats}")
 
 
 async def demo_retry_with_backoff():
@@ -116,7 +115,7 @@ async def demo_retry_decorator():
 
     call_count = 0
 
-    @with_retry(RetryConfig(max_retries=2, base_delay=0.1))
+    @with_retry(RetryConfig(max_retries=2, base_delay=0.1, retryable_errors=(ValueError,)))
     async def decorated_operation():
         nonlocal call_count
         call_count += 1
