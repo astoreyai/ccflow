@@ -11,6 +11,7 @@ Complete API documentation for ccflow - Claude Code CLI Middleware.
 - [Message Types](#message-types)
 - [Parser Helpers](#parser-helpers)
 - [Storage & Persistence](#storage--persistence)
+- [Project & Tracing](#project--tracing)
 - [Events & Observability](#events--observability)
 - [Rate Limiting](#rate-limiting)
 - [Reliability & Fault Tolerance](#reliability--fault-tolerance)
@@ -695,6 +696,409 @@ class SessionStatus(str, Enum):
     ERROR = "error"
     EXPIRED = "expired"
 ```
+
+---
+
+## Project & Tracing
+
+Hierarchical project organization with full trace recording for replay and analysis.
+
+### `Project`
+
+Organize related sessions under a project with nested sub-projects.
+
+```python
+class Project:
+    def __init__(
+        self,
+        project_id: str | None = None,
+        name: str = "",
+        description: str = "",
+        parent_project_id: str | None = None,
+        *,
+        store: ProjectStore | None = None,
+        trace_store: TraceStore | None = None,
+        session_store: SessionStore | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None
+```
+
+**Properties:**
+- `project_id` (str): Unique project identifier
+- `name` (str): Project name
+- `description` (str): Project description
+- `parent_project_id` (str | None): Parent for nested projects
+
+**Methods:**
+
+#### `create_session()`
+
+```python
+def create_session(
+    self,
+    options: CLIAgentOptions | None = None,
+    *,
+    detailed: bool = False,
+) -> TracingSession
+```
+
+Create a tracing session within this project.
+
+#### `create_subproject()`
+
+```python
+def create_subproject(
+    self,
+    name: str,
+    description: str = "",
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Project
+```
+
+Create a nested sub-project.
+
+#### `get_traces()`
+
+```python
+async def get_traces(
+    self,
+    *,
+    include_subprojects: bool = False,
+    limit: int = 100,
+) -> list[TraceData]
+```
+
+Get all traces in this project.
+
+#### `replay_as_new()`
+
+```python
+async def replay_as_new(
+    self,
+    trace_id: str,
+    *,
+    options_override: CLIAgentOptions | None = None,
+    detailed: bool = False,
+) -> TracingSession
+```
+
+Replay a trace as a new session with the original prompt.
+
+#### `replay_fork()`
+
+```python
+async def replay_fork(
+    self,
+    trace_id: str,
+    *,
+    options_override: CLIAgentOptions | None = None,
+) -> TracingSession
+```
+
+Fork from original session state using CLI `--fork`.
+
+#### `get_trace_summary()`
+
+```python
+async def get_trace_summary(self) -> dict[str, Any]
+```
+
+Get aggregate statistics: total_traces, input_tokens, output_tokens, thinking_tokens, total_cost_usd, etc.
+
+#### `save()` / `load()`
+
+```python
+async def save(self) -> None
+
+@classmethod
+async def load(
+    cls,
+    project_id: str,
+    store: ProjectStore,
+    *,
+    trace_store: TraceStore | None = None,
+    session_store: SessionStore | None = None,
+) -> Project | None
+```
+
+**Example:**
+```python
+from ccflow import Project, CLIAgentOptions
+from ccflow.stores import SQLiteProjectStore, SQLiteTraceStore, SQLiteSessionStore
+
+# Initialize stores
+db_path = "ccflow.db"
+project_store = SQLiteProjectStore(db_path)
+trace_store = SQLiteTraceStore(db_path)
+session_store = SQLiteSessionStore(db_path)
+
+# Create project
+project = Project(
+    name="Code Review",
+    store=project_store,
+    trace_store=trace_store,
+    session_store=session_store,
+)
+await project.save()
+
+# Create session with tracing
+session = project.create_session(
+    options=CLIAgentOptions(model="sonnet", ultrathink=True),
+    detailed=True,
+)
+
+async for msg in session.send_message("Review this code"):
+    print(msg.content, end="")
+
+# Get trace
+trace = session.last_trace
+print(f"Duration: {trace.duration_ms}ms")
+
+# Replay with different model
+new_session = await project.replay_as_new(
+    trace.trace_id,
+    options_override=CLIAgentOptions(model="opus"),
+)
+```
+
+---
+
+### `TracingSession`
+
+Session subclass that auto-records full traces.
+
+```python
+class TracingSession(Session):
+    def __init__(
+        self,
+        session_id: str | None = None,
+        options: CLIAgentOptions | None = None,
+        executor: CLIExecutor | None = None,
+        store: SessionStore | None = None,
+        emitter: EventEmitter | None = None,
+        *,
+        project_id: str | None = None,
+        trace_store: TraceStore | None = None,
+        detailed: bool = False,
+    ) -> None
+```
+
+**Properties:**
+- `project_id` (str | None): Parent project ID
+- `last_trace` (TraceData | None): Most recent trace
+- `trace_count` (int): Number of traces recorded
+
+**Methods:**
+
+#### `send_message()`
+
+```python
+async def send_message(
+    self,
+    content: str,
+    context: dict | None = None,
+    *,
+    detailed: bool | None = None,
+) -> AsyncIterator[Message]
+```
+
+Send message with full trace recording.
+
+#### `get_traces()`
+
+```python
+async def get_traces(self, limit: int = 100) -> list[TraceData]
+```
+
+Get all traces for this session.
+
+---
+
+### `TraceData`
+
+Complete trace of a single prompt/response cycle.
+
+```python
+@dataclass
+class TraceData:
+    trace_id: str
+    session_id: str
+    project_id: str | None = None
+    parent_trace_id: str | None = None
+    sequence_number: int = 0
+
+    # Content
+    prompt: str = ""
+    response: str = ""
+    thinking: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    message_stream: list[dict[str, Any]] | None = None  # detailed mode
+
+    # Configuration snapshot
+    options_snapshot: dict[str, Any] = field(default_factory=dict)
+
+    # Metrics
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+    cost_usd: float = 0.0
+    duration_ms: int = 0
+
+    # Status
+    status: TraceStatus = TraceStatus.PENDING
+    error_message: str | None = None
+
+    # Timestamps
+    created_at: str = ""
+    updated_at: str = ""
+
+    # Extensibility
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_detail(self) -> bool
+
+    @property
+    def total_tokens(self) -> int
+```
+
+---
+
+### `TraceStatus`
+
+```python
+class TraceStatus(str, Enum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+```
+
+---
+
+### `ProjectData`
+
+```python
+@dataclass
+class ProjectData:
+    project_id: str
+    name: str
+    description: str = ""
+    parent_project_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+```
+
+---
+
+### `TraceFilter`
+
+```python
+@dataclass
+class TraceFilter:
+    session_id: str | None = None
+    project_id: str | None = None
+    status: TraceStatus | None = None
+    parent_trace_id: str | None = None
+    after: str | None = None  # ISO timestamp
+    before: str | None = None
+    limit: int = 100
+    offset: int = 0
+```
+
+---
+
+### `ProjectFilter`
+
+```python
+@dataclass
+class ProjectFilter:
+    name_contains: str | None = None
+    parent_project_id: str | None = None
+    after: str | None = None  # ISO timestamp
+    before: str | None = None
+    limit: int = 100
+    offset: int = 0
+```
+
+---
+
+### `TraceStore` Protocol
+
+```python
+class TraceStore(Protocol):
+    async def save(self, trace: TraceData) -> None
+    async def load(self, trace_id: str) -> TraceData | None
+    async def delete(self, trace_id: str) -> bool
+    async def list(self, filter: TraceFilter | None = None) -> list[TraceData]
+    async def get_session_traces(self, session_id: str, limit: int = 100) -> list[TraceData]
+    async def get_project_traces(self, project_id: str, limit: int = 100) -> list[TraceData]
+    async def count(self, filter: TraceFilter | None = None) -> int
+    async def cleanup(self, older_than: timedelta) -> int
+    async def close(self) -> None
+```
+
+---
+
+### `ProjectStore` Protocol
+
+```python
+class ProjectStore(Protocol):
+    async def save(self, project: ProjectData) -> None
+    async def load(self, project_id: str) -> ProjectData | None
+    async def delete(self, project_id: str) -> bool
+    async def list(self, filter: ProjectFilter | None = None) -> list[ProjectData]
+    async def get_project_sessions(self, project_id: str, limit: int = 100) -> list[SessionMetadata]
+    async def get_subprojects(self, project_id: str) -> list[ProjectData]
+    async def count(self, filter: ProjectFilter | None = None) -> int
+    async def close(self) -> None
+```
+
+---
+
+### `SQLiteTraceStore`
+
+```python
+class SQLiteTraceStore(BaseTraceStore):
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        timeout: float = 30.0,
+    ) -> None
+```
+
+---
+
+### `SQLiteProjectStore`
+
+```python
+class SQLiteProjectStore(BaseProjectStore):
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        timeout: float = 30.0,
+    ) -> None
+```
+
+---
+
+### `create_tracing_session()`
+
+```python
+async def create_tracing_session(
+    project_id: str | None = None,
+    options: CLIAgentOptions | None = None,
+    trace_store: TraceStore | None = None,
+    session_store: SessionStore | None = None,
+    detailed: bool = False,
+) -> TracingSession
+```
+
+Convenience function for creating TracingSession.
 
 ---
 
