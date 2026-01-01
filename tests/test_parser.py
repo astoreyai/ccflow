@@ -5,7 +5,10 @@ import pytest
 from ccflow.parser import (
     StreamParser,
     collect_text,
+    collect_thinking,
     extract_session_id,
+    extract_thinking_from_assistant,
+    extract_thinking_tokens,
     extract_usage,
     parse_event,
 )
@@ -17,6 +20,7 @@ from ccflow.types import (
     ResultMessage,
     StopMessage,
     TextMessage,
+    ThinkingMessage,
     ToolResultMessage,
     ToolUseMessage,
     UnknownMessage,
@@ -290,3 +294,266 @@ class TestConvenienceFunctions:
         ]
         text = collect_text(messages)
         assert text == ""
+
+
+class TestThinkingParsing:
+    """Tests for ultrathink/extended thinking parsing."""
+
+    def test_parse_thinking_message(self):
+        """Test parsing thinking event."""
+        event = {
+            "type": "thinking",
+            "content": "Let me analyze this step by step...",
+            "thinking_tokens": 150,
+        }
+        msg = parse_event(event)
+
+        assert isinstance(msg, ThinkingMessage)
+        assert msg.content == "Let me analyze this step by step..."
+        assert msg.thinking_tokens == 150
+        assert msg.type == "thinking"
+
+    def test_parse_thinking_message_with_thinking_field(self):
+        """Test parsing thinking event with 'thinking' field instead of 'content'."""
+        event = {
+            "type": "thinking",
+            "thinking": "First, I need to consider the implications...",
+            "thinking_tokens": 200,
+        }
+        msg = parse_event(event)
+
+        assert isinstance(msg, ThinkingMessage)
+        assert msg.content == "First, I need to consider the implications..."
+        assert msg.thinking_tokens == 200
+
+    def test_parse_thinking_message_minimal(self):
+        """Test parsing thinking event with minimal data."""
+        event = {"type": "thinking"}
+        msg = parse_event(event)
+
+        assert isinstance(msg, ThinkingMessage)
+        assert msg.content == ""
+        assert msg.thinking_tokens == 0
+
+    def test_parse_thinking_message_zero_tokens(self):
+        """Test parsing thinking event with content but no token count."""
+        event = {
+            "type": "thinking",
+            "content": "Some reasoning here",
+        }
+        msg = parse_event(event)
+
+        assert isinstance(msg, ThinkingMessage)
+        assert msg.content == "Some reasoning here"
+        assert msg.thinking_tokens == 0
+
+
+class TestCollectThinking:
+    """Tests for collect_thinking function."""
+
+    def test_collect_thinking_single(self):
+        """Test collecting thinking from single message."""
+        messages = [
+            ThinkingMessage(content="Step 1: Analyze the problem", thinking_tokens=50),
+        ]
+        thinking = collect_thinking(messages)
+        assert thinking == "Step 1: Analyze the problem"
+
+    def test_collect_thinking_multiple(self):
+        """Test collecting thinking from multiple messages."""
+        messages = [
+            ThinkingMessage(content="First, ", thinking_tokens=10),
+            TextMessage(content="Here is my response"),
+            ThinkingMessage(content="let me think ", thinking_tokens=15),
+            ThinkingMessage(content="about this.", thinking_tokens=12),
+        ]
+        thinking = collect_thinking(messages)
+        assert thinking == "First, let me think about this."
+
+    def test_collect_thinking_mixed_messages(self):
+        """Test collecting thinking ignores non-thinking messages."""
+        messages = [
+            InitMessage(session_id="abc"),
+            ThinkingMessage(content="Reasoning here", thinking_tokens=100),
+            TextMessage(content="Response text"),
+            ToolUseMessage(tool="Read", args={}),
+            ThinkingMessage(content=" and more reasoning", thinking_tokens=50),
+            StopMessage(session_id="abc", usage={}),
+        ]
+        thinking = collect_thinking(messages)
+        assert thinking == "Reasoning here and more reasoning"
+
+    def test_collect_thinking_empty(self):
+        """Test collecting thinking with no thinking messages."""
+        messages = [
+            InitMessage(session_id="abc"),
+            TextMessage(content="Hello"),
+            StopMessage(session_id="abc", usage={}),
+        ]
+        thinking = collect_thinking(messages)
+        assert thinking == ""
+
+    def test_collect_thinking_empty_list(self):
+        """Test collecting thinking from empty list."""
+        thinking = collect_thinking([])
+        assert thinking == ""
+
+
+class TestExtractThinkingFromAssistant:
+    """Tests for extract_thinking_from_assistant function."""
+
+    def test_extract_thinking_from_content_blocks(self):
+        """Test extracting thinking from assistant message content blocks."""
+        msg = AssistantMessage(
+            content=[
+                {"type": "thinking", "thinking": "Let me analyze this..."},
+                {"type": "text", "text": "Here is my answer."},
+            ],
+            model="claude-sonnet-4-5-20250929",
+            message_id="msg_123",
+            session_id="session-abc",
+            usage={},
+        )
+        thinking = extract_thinking_from_assistant(msg)
+        assert thinking == "Let me analyze this..."
+
+    def test_extract_thinking_multiple_blocks(self):
+        """Test extracting thinking from multiple thinking blocks."""
+        msg = AssistantMessage(
+            content=[
+                {"type": "thinking", "thinking": "First thought. "},
+                {"type": "text", "text": "Some text."},
+                {"type": "thinking", "thinking": "Second thought."},
+            ],
+            model="claude-sonnet-4-5-20250929",
+            message_id="msg_123",
+            session_id="session-abc",
+            usage={},
+        )
+        thinking = extract_thinking_from_assistant(msg)
+        assert thinking == "First thought. Second thought."
+
+    def test_extract_thinking_no_thinking_blocks(self):
+        """Test extracting thinking when no thinking blocks present."""
+        msg = AssistantMessage(
+            content=[
+                {"type": "text", "text": "Here is my response."},
+            ],
+            model="claude-sonnet-4-5-20250929",
+            message_id="msg_123",
+            session_id="session-abc",
+            usage={},
+        )
+        thinking = extract_thinking_from_assistant(msg)
+        assert thinking == ""
+
+    def test_extract_thinking_empty_content(self):
+        """Test extracting thinking from empty content."""
+        msg = AssistantMessage(
+            content=[],
+            model="claude-sonnet-4-5-20250929",
+            message_id="msg_123",
+            session_id="session-abc",
+            usage={},
+        )
+        thinking = extract_thinking_from_assistant(msg)
+        assert thinking == ""
+
+    def test_extract_thinking_missing_thinking_field(self):
+        """Test extracting thinking when thinking block has no thinking field."""
+        msg = AssistantMessage(
+            content=[
+                {"type": "thinking"},  # Missing 'thinking' field
+                {"type": "text", "text": "Response"},
+            ],
+            model="claude-sonnet-4-5-20250929",
+            message_id="msg_123",
+            session_id="session-abc",
+            usage={},
+        )
+        thinking = extract_thinking_from_assistant(msg)
+        assert thinking == ""
+
+
+class TestExtractThinkingTokens:
+    """Tests for extract_thinking_tokens function."""
+
+    def test_extract_thinking_tokens_from_thinking_event(self):
+        """Test extracting thinking tokens from thinking events."""
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "abc"},
+            {"type": "thinking", "content": "Reasoning...", "thinking_tokens": 150},
+            {"type": "message", "content": "Response"},
+            {"type": "system", "subtype": "stop", "session_id": "abc", "usage": {}},
+        ]
+        tokens = extract_thinking_tokens(events)
+        assert tokens == 150
+
+    def test_extract_thinking_tokens_multiple_events(self):
+        """Test extracting thinking tokens from multiple thinking events."""
+        events = [
+            {"type": "thinking", "content": "First", "thinking_tokens": 100},
+            {"type": "thinking", "content": "Second", "thinking_tokens": 75},
+            {"type": "thinking", "content": "Third", "thinking_tokens": 50},
+        ]
+        tokens = extract_thinking_tokens(events)
+        assert tokens == 225
+
+    def test_extract_thinking_tokens_from_stop_event(self):
+        """Test extracting thinking tokens from stop event usage."""
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "abc"},
+            {"type": "message", "content": "Response"},
+            {
+                "type": "system",
+                "subtype": "stop",
+                "session_id": "abc",
+                "usage": {"input_tokens": 100, "output_tokens": 50, "thinking_tokens": 200},
+            },
+        ]
+        tokens = extract_thinking_tokens(events)
+        assert tokens == 200
+
+    def test_extract_thinking_tokens_from_result_event(self):
+        """Test extracting thinking tokens from result event usage."""
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "abc"},
+            {
+                "type": "result",
+                "result": "Done",
+                "usage": {"input_tokens": 100, "output_tokens": 50, "thinking_tokens": 300},
+            },
+        ]
+        tokens = extract_thinking_tokens(events)
+        assert tokens == 300
+
+    def test_extract_thinking_tokens_combined(self):
+        """Test extracting thinking tokens from both events and usage."""
+        events = [
+            {"type": "thinking", "content": "First", "thinking_tokens": 100},
+            {"type": "thinking", "content": "Second", "thinking_tokens": 50},
+            {
+                "type": "system",
+                "subtype": "stop",
+                "session_id": "abc",
+                "usage": {"thinking_tokens": 75},
+            },
+        ]
+        tokens = extract_thinking_tokens(events)
+        # 100 + 50 + 75 = 225
+        assert tokens == 225
+
+    def test_extract_thinking_tokens_no_thinking(self):
+        """Test extracting thinking tokens when none present."""
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "abc"},
+            {"type": "message", "content": "Response"},
+            {"type": "system", "subtype": "stop", "session_id": "abc", "usage": {}},
+        ]
+        tokens = extract_thinking_tokens(events)
+        assert tokens == 0
+
+    def test_extract_thinking_tokens_empty_events(self):
+        """Test extracting thinking tokens from empty list."""
+        tokens = extract_thinking_tokens([])
+        assert tokens == 0
