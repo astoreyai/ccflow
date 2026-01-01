@@ -111,9 +111,9 @@ class CLIExecutor:
         elif options.session_id:
             flags.extend(["--session-id", options.session_id])
 
-        # Execution limits
-        if options.max_turns is not None:
-            flags.extend(["--max-turns", str(options.max_turns)])
+        # Budget limit
+        if options.max_budget_usd is not None:
+            flags.extend(["--max-budget-usd", str(options.max_budget_usd)])
 
         # Working directory
         if options.add_dirs:
@@ -133,8 +133,8 @@ class CLIExecutor:
             flags.extend(["--mcp-config", str(config_path)])
 
             if options.strict_mcp:
-                # Only use specified MCP servers, disable defaults
-                flags.append("--no-mcp")
+                # Only use specified MCP servers, ignore other configs
+                flags.append("--strict-mcp-config")
 
         return flags
 

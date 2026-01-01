@@ -232,7 +232,7 @@ class TestOptionsIntegration:
             system_prompt="Be helpful",
             permission_mode=PermissionMode.ACCEPT_EDITS,
             allowed_tools=["Read", "Write"],
-            max_turns=10,
+            max_budget_usd=10.0,
             verbose=True,
         )
 
@@ -244,8 +244,8 @@ class TestOptionsIntegration:
         assert "--permission-mode" in flags
         assert "acceptEdits" in flags
         assert "--allowedTools" in flags
-        assert "--max-turns" in flags
-        assert "10" in flags
+        assert "--max-budget-usd" in flags
+        assert "10.0" in flags
 
     def test_build_flags_with_session_resume(self):
         """Test flags for session resume."""
@@ -647,7 +647,7 @@ class TestMCPIntegration:
         executor.cleanup()
 
     def test_build_flags_with_mcp_servers_strict_mode(self):
-        """Test that strict_mcp adds --no-mcp flag."""
+        """Test that strict_mcp adds --strict-mcp-config flag."""
         from ccflow.types import MCPServerConfig
 
         executor = CLIExecutor(cli_path="/usr/bin/claude")
@@ -661,7 +661,7 @@ class TestMCPIntegration:
         flags = executor.build_flags(options)
 
         assert "--mcp-config" in flags
-        assert "--no-mcp" in flags
+        assert "--strict-mcp-config" in flags
 
         # Cleanup
         executor.cleanup()
@@ -741,6 +741,6 @@ class TestMCPIntegration:
         flags = executor.build_flags(options)
 
         assert "--mcp-config" not in flags
-        assert "--no-mcp" not in flags
+        assert "--strict-mcp-config" not in flags
 
         executor.cleanup()

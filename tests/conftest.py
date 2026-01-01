@@ -33,7 +33,7 @@ def default_options() -> CLIAgentOptions:
     """Return default CLI agent options for tests."""
     return CLIAgentOptions(
         model="sonnet",
-        max_turns=5,
+        max_budget_usd=5.0,
         timeout=30.0,
         toon=ToonConfig(enabled=True, track_savings=True),
     )

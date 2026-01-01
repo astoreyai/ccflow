@@ -118,7 +118,7 @@ class CLIAgentOptions:
         session_id: Specific session UUID
         resume: Whether to resume previous session
         fork_session: Create new branch from resumed session
-        max_turns: Limit agentic turns
+        max_budget_usd: Maximum dollar amount to spend on API calls
         timeout: Execution timeout in seconds
         cwd: Working directory
         add_dirs: Additional directories to include
@@ -149,7 +149,7 @@ class CLIAgentOptions:
     fork_session: bool = False
 
     # Execution limits
-    max_turns: int | None = None
+    max_budget_usd: float | None = None
     timeout: float = 300.0
 
     # Working directory

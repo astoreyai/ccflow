@@ -286,7 +286,7 @@ class TestSessionFork:
         options = CLIAgentOptions(
             model="opus",
             permission_mode=PermissionMode.BYPASS,
-            max_turns=10,
+            max_budget_usd=10.0,
         )
 
         with patch('ccflow.session.get_executor') as mock_get_executor:
@@ -297,7 +297,7 @@ class TestSessionFork:
             forked = await session.fork()
 
         assert forked._options.model == "opus"
-        assert forked._options.max_turns == 10
+        assert forked._options.max_budget_usd == 10.0
 
     @pytest.mark.asyncio
     async def test_fork_sets_fork_session_flag(self):
@@ -420,14 +420,14 @@ class TestResumeSession:
     @pytest.mark.asyncio
     async def test_resume_session_uses_provided_options(self):
         """Test resume_session uses provided options."""
-        options = CLIAgentOptions(model="haiku", max_turns=5)
+        options = CLIAgentOptions(model="haiku", max_budget_usd=5.0)
 
         with patch('ccflow.session.get_executor') as mock_get_executor:
             mock_get_executor.return_value = MagicMock()
             session = await resume_session("existing-session-id", options=options)
 
         assert session._options.model == "haiku"
-        assert session._options.max_turns == 5
+        assert session._options.max_budget_usd == 5.0
         assert session._options.resume is True
 
     @pytest.mark.asyncio

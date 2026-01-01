@@ -437,13 +437,13 @@ class TestStreamToCallback:
              patch('ccflow.api.record_request'):
             mock_get_executor.return_value = mock_executor
 
-            options = CLIAgentOptions(model="haiku", max_turns=5)
+            options = CLIAgentOptions(model="haiku", max_budget_usd=5.0)
             await stream_to_callback("Test", lambda m: None, options)
 
             assert "--model" in captured_flags
             assert "haiku" in captured_flags
-            assert "--max-turns" in captured_flags
-            assert "5" in captured_flags
+            assert "--max-budget-usd" in captured_flags
+            assert "5.0" in captured_flags
 
     @pytest.mark.asyncio
     async def test_stream_to_callback_handles_error(self):

@@ -126,7 +126,7 @@ class Session:
             disallowed_tools=self._options.disallowed_tools,
             session_id=self._session_id,
             resume=not self._is_first_message,  # Resume after first message
-            max_turns=self._options.max_turns,
+            max_budget_usd=self._options.max_budget_usd,
             timeout=self._options.timeout,
             cwd=self._options.cwd,
             add_dirs=self._options.add_dirs,
@@ -196,7 +196,7 @@ class Session:
             session_id=self._session_id,
             resume=True,
             fork_session=True,  # This creates new ID from current state
-            max_turns=self._options.max_turns,
+            max_budget_usd=self._options.max_budget_usd,
             timeout=self._options.timeout,
             cwd=self._options.cwd,
             add_dirs=self._options.add_dirs,
