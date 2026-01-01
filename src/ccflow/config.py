@@ -162,9 +162,10 @@ def configure_logging(settings: CCFlowSettings | None = None) -> None:
 
     settings = settings or get_settings()
 
+    # Common processors for all formats
+    # Note: filter_by_level requires stdlib logger, not PrintLogger
     if settings.log_format == "json":
         processors = [
-            structlog.stdlib.filter_by_level,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
@@ -176,8 +177,8 @@ def configure_logging(settings: CCFlowSettings | None = None) -> None:
         ]
     else:
         processors = [
-            structlog.stdlib.filter_by_level,
             structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
             structlog.dev.ConsoleRenderer(colors=True),
         ]
 
