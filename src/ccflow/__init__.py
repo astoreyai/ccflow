@@ -98,6 +98,7 @@ from ccflow.pricing import (
     reset_usage_tracker,
     track_usage,
 )
+from ccflow.project import Project
 from ccflow.rate_limiting import (
     CombinedLimiter,
     ConcurrencyLimiter,
@@ -141,7 +142,19 @@ from ccflow.store import (
     SessionStatus,
     SessionStore,
 )
-from ccflow.stores import MemorySessionStore, SQLiteSessionStore
+from ccflow.stores import (
+    MemorySessionStore,
+    SQLiteProjectStore,
+    SQLiteSessionStore,
+    SQLiteTraceStore,
+)
+from ccflow.trace_store import (
+    BaseProjectStore,
+    BaseTraceStore,
+    ProjectStore,
+    TraceStore,
+)
+from ccflow.tracing import TracingSession, create_tracing_session
 from ccflow.types import (
     AssistantMessage,
     CLIAgentOptions,
@@ -150,6 +163,8 @@ from ccflow.types import (
     MCPServerConfig,
     Message,
     PermissionMode,
+    ProjectData,
+    ProjectFilter,
     QueryResult,
     ResultMessage,
     SessionStats,
@@ -159,6 +174,9 @@ from ccflow.types import (
     ToolResultMessage,
     ToolUseMessage,
     ToonConfig,
+    TraceData,
+    TraceFilter,
+    TraceStatus,
     UnknownMessage,
     UnknownSystemMessage,
     UserMessage,
@@ -174,7 +192,10 @@ __all__ = [
     "APIRateLimitError",
     "APIResponse",
     "AssistantMessage",
+    # Store base classes
+    "BaseProjectStore",
     "BaseSessionStore",
+    "BaseTraceStore",
     # Exceptions
     "CCFlowError",
     # Configuration
@@ -221,6 +242,11 @@ __all__ = [
     "PoolTask",
     # Process Pool
     "ProcessPool",
+    # Project and Trace system
+    "Project",
+    "ProjectData",
+    "ProjectFilter",
+    "ProjectStore",
     # Prometheus Metrics
     "PrometheusEventHandler",
     # Results
@@ -232,7 +258,9 @@ __all__ = [
     "RetryExhaustedError",
     "RetryHandler",
     "RetryStats",
+    "SQLiteProjectStore",
     "SQLiteSessionStore",
+    "SQLiteTraceStore",
     "Session",
     "SessionClosedEvent",
     "SessionCreatedEvent",
@@ -270,6 +298,12 @@ __all__ = [
     "ToolUseMessage",
     "ToonConfig",
     "ToonEncodingError",
+    # Trace system
+    "TraceData",
+    "TraceFilter",
+    "TraceStatus",
+    "TraceStore",
+    "TracingSession",
     "TurnCompletedEvent",
     "TurnStartedEvent",
     "UnknownMessage",
@@ -283,6 +317,7 @@ __all__ = [
     # Parser helpers
     "collect_text",
     "collect_thinking",
+    "create_tracing_session",
     "extract_model_from_events",
     "extract_thinking_from_assistant",
     "extract_thinking_tokens",

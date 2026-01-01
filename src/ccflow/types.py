@@ -442,3 +442,174 @@ class SessionStats:
     def total_tokens(self) -> int:
         """Total tokens consumed."""
         return self.total_input_tokens + self.total_output_tokens
+
+
+# ============================================================================
+# Project and Trace System Types
+# ============================================================================
+
+
+class TraceStatus(str, Enum):
+    """Status of a trace execution.
+
+    Attributes:
+        PENDING: Trace started, execution in progress
+        SUCCESS: Trace completed successfully
+        ERROR: Trace failed with error
+        CANCELLED: Trace was cancelled
+    """
+
+    PENDING = "pending"
+    SUCCESS = "success"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class TraceData:
+    """Complete trace of a single prompt/response cycle.
+
+    Captures the full execution context including prompt, response,
+    thinking content, tool calls, and metrics.
+
+    Attributes:
+        trace_id: Unique identifier (UUID4)
+        session_id: Parent session ID
+        project_id: Parent project ID (optional)
+        parent_trace_id: For nested/forked traces (optional)
+        sequence_number: Order within session
+        prompt: Full input prompt
+        response: Full output response
+        thinking: Extended thinking content (ultrathink)
+        tool_calls: List of {name, args, result} dicts
+        message_stream: Raw message events if detailed=True
+        options_snapshot: CLIAgentOptions at execution time
+        input_tokens: Input token count
+        output_tokens: Output token count
+        thinking_tokens: Thinking token count
+        cost_usd: Estimated cost
+        duration_ms: Execution time in milliseconds
+        status: Execution status
+        error_message: Error details if status=ERROR
+        created_at: Creation timestamp (ISO format)
+        updated_at: Last update timestamp (ISO format)
+        metadata: Extensible metadata dict
+    """
+
+    trace_id: str
+    session_id: str
+    project_id: str | None = None
+    parent_trace_id: str | None = None
+    sequence_number: int = 0
+
+    # Content
+    prompt: str = ""
+    response: str = ""
+    thinking: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    # Message-level detail (optional, when detailed=True)
+    message_stream: list[dict[str, Any]] | None = None
+
+    # Configuration snapshot
+    options_snapshot: dict[str, Any] = field(default_factory=dict)
+
+    # Metrics
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+    cost_usd: float = 0.0
+    duration_ms: int = 0
+
+    # Status
+    status: TraceStatus = TraceStatus.PENDING
+    error_message: str | None = None
+
+    # Timestamps (ISO format strings)
+    created_at: str = ""
+    updated_at: str = ""
+
+    # Extensibility
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_detail(self) -> bool:
+        """Check if message-level detail was captured."""
+        return self.message_stream is not None
+
+    @property
+    def total_tokens(self) -> int:
+        """Total tokens including thinking."""
+        return self.input_tokens + self.output_tokens + self.thinking_tokens
+
+
+@dataclass
+class ProjectData:
+    """Project for organizing sessions and traces.
+
+    Projects provide hierarchical organization with optional nesting
+    via parent_project_id.
+
+    Attributes:
+        project_id: Unique identifier (UUID4)
+        name: Project name
+        description: Optional description
+        parent_project_id: Parent project for nesting (optional)
+        metadata: Extensible metadata dict
+        created_at: Creation timestamp (ISO format)
+        updated_at: Last update timestamp (ISO format)
+    """
+
+    project_id: str
+    name: str
+    description: str = ""
+    parent_project_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class TraceFilter:
+    """Filter criteria for querying traces.
+
+    Attributes:
+        session_id: Filter by session
+        project_id: Filter by project
+        status: Filter by status
+        parent_trace_id: Filter by parent trace
+        after: Traces created after this timestamp
+        before: Traces created before this timestamp
+        limit: Maximum number of results
+        offset: Skip first N results
+    """
+
+    session_id: str | None = None
+    project_id: str | None = None
+    status: TraceStatus | None = None
+    parent_trace_id: str | None = None
+    after: str | None = None  # ISO timestamp
+    before: str | None = None  # ISO timestamp
+    limit: int = 100
+    offset: int = 0
+
+
+@dataclass
+class ProjectFilter:
+    """Filter criteria for querying projects.
+
+    Attributes:
+        name_contains: Filter by name substring
+        parent_project_id: Filter by parent project
+        after: Projects created after this timestamp
+        before: Projects created before this timestamp
+        limit: Maximum number of results
+        offset: Skip first N results
+    """
+
+    name_contains: str | None = None
+    parent_project_id: str | None = None
+    after: str | None = None  # ISO timestamp
+    before: str | None = None  # ISO timestamp
+    limit: int = 100
+    offset: int = 0

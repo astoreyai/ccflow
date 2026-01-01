@@ -13,6 +13,7 @@ Production middleware bridging Claude Code CLI with SDK-like Python interfaces.
 - **Session Management** - Multi-turn conversations via CLI `--resume`
 - **Batch Processing** - Concurrent query execution with configurable parallelism
 - **Extended Thinking** - Ultrathink mode for deeper reasoning with thinking token tracking
+- **Project & Tracing** - Hierarchical project organization with full trace recording and replay
 - **MCP Support** - Programmatic MCP server configuration
 - **Observability** - Prometheus metrics, structured logging
 
@@ -138,6 +139,55 @@ async for msg in query("Analyze this complex algorithm and find edge cases", opt
         print(f"  Thinking tokens: {msg.thinking_tokens}")
     elif isinstance(msg, TextMessage):
         print(msg.content, end="")
+```
+
+### Project & Trace Recording
+
+```python
+from ccflow import Project, CLIAgentOptions
+from ccflow.stores import SQLiteProjectStore, SQLiteTraceStore, SQLiteSessionStore
+
+# Initialize stores (same DB)
+db_path = "ccflow.db"
+project_store = SQLiteProjectStore(db_path)
+trace_store = SQLiteTraceStore(db_path)
+session_store = SQLiteSessionStore(db_path)
+
+# Create project for organizing sessions
+project = Project(
+    name="Code Review Analysis",
+    description="Analyzing code review patterns",
+    store=project_store,
+    trace_store=trace_store,
+    session_store=session_store,
+)
+await project.save()
+
+# Create session with full trace recording
+session = project.create_session(
+    options=CLIAgentOptions(model="sonnet", ultrathink=True),
+    detailed=True,  # Capture message-level stream
+)
+
+async for msg in session.send_message("Analyze this function for bugs"):
+    print(msg.content, end="")
+
+# Access recorded trace
+trace = session.last_trace
+print(f"\nThinking tokens: {trace.thinking_tokens}")
+print(f"Tool calls: {len(trace.tool_calls)}")
+print(f"Duration: {trace.duration_ms}ms")
+
+# Get aggregate stats
+summary = await project.get_trace_summary()
+print(f"Total traces: {summary['total_traces']}")
+print(f"Total cost: ${summary['total_cost_usd']:.4f}")
+
+# Replay a trace with different options
+new_session = await project.replay_as_new(
+    trace.trace_id,
+    options_override=CLIAgentOptions(model="opus"),
+)
 ```
 
 ## Architecture

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Project & Trace System** - Hierarchical organization with full prompt trace recording
+  - `Project` class for organizing related sessions under projects
+  - `TracingSession` - Session subclass that auto-records full traces
+  - `TraceData` - Complete capture of prompt/response/thinking/tools per turn
+  - `TraceStatus` enum (pending, success, error, cancelled)
+  - `ProjectData`, `ProjectFilter`, `TraceFilter` dataclasses
+  - `TraceStore` and `ProjectStore` protocols
+  - `SQLiteTraceStore` and `SQLiteProjectStore` implementations
+  - Nested sub-projects via `parent_project_id`
+  - Replay capability: `replay_as_new()` and `replay_fork()` methods
+  - Message-level detail capture with `detailed=True` option
+  - Aggregate analysis via `get_trace_summary()`
+  - Schema migration from v1 to v2 (adds project_id to sessions)
+
 - **Extended Thinking (Ultrathink)** - Full support for Claude's extended thinking mode
   - `ultrathink` option in `CLIAgentOptions` to enable deep reasoning
   - `ThinkingMessage` type for thinking content blocks
