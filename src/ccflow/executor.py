@@ -93,7 +93,10 @@ class CLIExecutor:
             flags.extend(["--append-system-prompt", options.append_system_prompt])
 
         # Permissions
-        flags.extend(["--permission-mode", options.permission_mode.value])
+        perm_mode = options.permission_mode
+        if hasattr(perm_mode, 'value'):
+            perm_mode = perm_mode.value
+        flags.extend(["--permission-mode", perm_mode])
 
         if options.allowed_tools:
             flags.append("--allowedTools")
