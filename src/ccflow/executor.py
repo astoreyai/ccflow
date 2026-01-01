@@ -21,6 +21,7 @@ from ccflow.exceptions import (
     CLITimeoutError,
     ParseError,
 )
+from ccflow.mcp import MCPConfigManager
 
 if TYPE_CHECKING:
     from ccflow.types import CLIAgentOptions
@@ -51,6 +52,7 @@ class CLIExecutor:
         """
         self._cli_path = cli_path or self._find_cli()
         self._active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._mcp_manager = MCPConfigManager()
 
     def _find_cli(self) -> str:
         """Find claude CLI in PATH."""
@@ -124,6 +126,15 @@ class CLIExecutor:
 
         if options.include_partial:
             flags.append("--include-partial-messages")
+
+        # MCP server configuration
+        if options.mcp_servers:
+            config_path = self._mcp_manager.create_config_file(options.mcp_servers)
+            flags.extend(["--mcp-config", str(config_path)])
+
+            if options.strict_mcp:
+                # Only use specified MCP servers, disable defaults
+                flags.append("--no-mcp")
 
         return flags
 
@@ -271,6 +282,17 @@ class CLIExecutor:
             return process.returncode == 0
         except Exception:
             return False
+
+    def cleanup(self) -> None:
+        """Clean up resources including MCP config files."""
+        self._mcp_manager.cleanup()
+
+    def __del__(self) -> None:
+        """Clean up on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Ignore errors during cleanup
 
 
 # Module-level default executor

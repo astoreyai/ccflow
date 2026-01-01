@@ -509,3 +509,135 @@ class TestErrorHandlingIntegration:
         assert isinstance(msg, UnknownMessage)
         assert msg.event_type == "future_new_type"
         assert msg.raw_data == event
+
+
+class TestMCPIntegration:
+    """Test MCP configuration integration with executor."""
+
+    def test_build_flags_with_mcp_servers(self):
+        """Test that MCP servers generate --mcp-config flag."""
+        from ccflow.types import MCPServerConfig
+
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            mcp_servers={
+                "github": MCPServerConfig(
+                    command="npx",
+                    args=["@anthropic-ai/mcp-server-github"],
+                ),
+                "filesystem": MCPServerConfig(
+                    command="npx",
+                    args=["@anthropic-ai/mcp-server-filesystem", "/tmp"],
+                ),
+            },
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--mcp-config" in flags
+        # Config path should be in the flags
+        config_idx = flags.index("--mcp-config")
+        config_path = flags[config_idx + 1]
+        assert config_path.endswith(".json")
+
+        # Cleanup
+        executor.cleanup()
+
+    def test_build_flags_with_mcp_servers_strict_mode(self):
+        """Test that strict_mcp adds --no-mcp flag."""
+        from ccflow.types import MCPServerConfig
+
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            mcp_servers={
+                "custom": MCPServerConfig(command="python", args=["-m", "my_mcp"]),
+            },
+            strict_mcp=True,
+        )
+
+        flags = executor.build_flags(options)
+
+        assert "--mcp-config" in flags
+        assert "--no-mcp" in flags
+
+        # Cleanup
+        executor.cleanup()
+
+    def test_mcp_config_file_created(self):
+        """Test that MCP config file is created with correct content."""
+        from ccflow.types import MCPServerConfig
+        import json
+        from pathlib import Path
+
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions(
+            mcp_servers={
+                "test-server": MCPServerConfig(
+                    command="node",
+                    args=["server.js", "--port", "3000"],
+                    env={"API_KEY": "secret"},
+                ),
+            },
+        )
+
+        flags = executor.build_flags(options)
+
+        # Get config path and read it
+        config_idx = flags.index("--mcp-config")
+        config_path = Path(flags[config_idx + 1])
+
+        assert config_path.exists()
+
+        with open(config_path) as f:
+            config = json.load(f)
+
+        assert "mcpServers" in config
+        assert "test-server" in config["mcpServers"]
+        assert config["mcpServers"]["test-server"]["command"] == "node"
+        assert config["mcpServers"]["test-server"]["args"] == ["server.js", "--port", "3000"]
+        assert config["mcpServers"]["test-server"]["env"] == {"API_KEY": "secret"}
+
+        # Cleanup
+        executor.cleanup()
+        assert not config_path.exists()
+
+    def test_executor_cleanup_removes_mcp_configs(self):
+        """Test that executor cleanup removes MCP config files."""
+        from ccflow.types import MCPServerConfig
+        from pathlib import Path
+
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+
+        # Create multiple configs
+        for i in range(3):
+            options = CLIAgentOptions(
+                mcp_servers={
+                    f"server-{i}": MCPServerConfig(command="test", args=[]),
+                },
+            )
+            executor.build_flags(options)
+
+        # Get all config files
+        config_files = list(executor._mcp_manager._config_files)
+        assert len(config_files) == 3
+
+        for path in config_files:
+            assert path.exists()
+
+        # Cleanup
+        executor.cleanup()
+
+        for path in config_files:
+            assert not path.exists()
+
+    def test_build_flags_without_mcp_servers(self):
+        """Test that no MCP flags are added when mcp_servers is None."""
+        executor = CLIExecutor(cli_path="/usr/bin/claude")
+        options = CLIAgentOptions()
+
+        flags = executor.build_flags(options)
+
+        assert "--mcp-config" not in flags
+        assert "--no-mcp" not in flags
+
+        executor.cleanup()
