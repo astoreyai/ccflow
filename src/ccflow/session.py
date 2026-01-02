@@ -35,6 +35,7 @@ from ccflow.types import (
     CLIAgentOptions,
     InitMessage,
     Message,
+    ResultMessage,
     SessionStats,
     StopMessage,
     TextMessage,
@@ -417,6 +418,27 @@ class Session:
                     hook_event=HookEvent.STOP,
                     stop_reason=msg.stop_reason,
                     message=msg,
+                    metadata={"last_prompt": content},
+                )
+                await self._hooks.run(HookEvent.STOP, stop_ctx)
+
+            # Also run STOP hook on ResultMessage (CLI produces 'result' events)
+            if isinstance(msg, ResultMessage):
+                usage = getattr(msg, "usage", {})
+                self._total_input_tokens += usage.get("input_tokens", 0)
+                self._total_output_tokens += usage.get("output_tokens", 0)
+
+                stop_ctx = HookContext(
+                    session_id=self._session_id,
+                    hook_event=HookEvent.STOP,
+                    stop_reason="result",
+                    message=msg,
+                    metadata={
+                        "last_prompt": content,
+                        "usage": usage,
+                        "total_cost_usd": getattr(msg, "total_cost_usd", 0.0),
+                        "duration_ms": getattr(msg, "duration_ms", 0),
+                    },
                 )
                 await self._hooks.run(HookEvent.STOP, stop_ctx)
 
