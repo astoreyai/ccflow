@@ -412,13 +412,17 @@ class Session:
                     output_tokens=turn_output_tokens,
                 )
 
-                # Run STOP hook
+                # Run STOP hook with accumulated response
+                response_text = "".join(response_parts)
                 stop_ctx = HookContext(
                     session_id=self._session_id,
                     hook_event=HookEvent.STOP,
                     stop_reason=msg.stop_reason,
                     message=msg,
-                    metadata={"last_prompt": content},
+                    metadata={
+                        "last_prompt": content,
+                        "last_response": response_text,
+                    },
                 )
                 await self._hooks.run(HookEvent.STOP, stop_ctx)
 
@@ -428,6 +432,8 @@ class Session:
                 self._total_input_tokens += usage.get("input_tokens", 0)
                 self._total_output_tokens += usage.get("output_tokens", 0)
 
+                # Include accumulated response text in metadata
+                response_text = "".join(response_parts)
                 stop_ctx = HookContext(
                     session_id=self._session_id,
                     hook_event=HookEvent.STOP,
@@ -435,6 +441,7 @@ class Session:
                     message=msg,
                     metadata={
                         "last_prompt": content,
+                        "last_response": response_text,
                         "usage": usage,
                         "total_cost_usd": getattr(msg, "total_cost_usd", 0.0),
                         "duration_ms": getattr(msg, "duration_ms", 0),

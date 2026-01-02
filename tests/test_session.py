@@ -646,3 +646,44 @@ class TestSessionHooks:
 
         assert len(captured_prompt) == 1
         assert captured_prompt[0] == "What is the meaning of life?"
+
+    @pytest.mark.asyncio
+    async def test_stop_hook_receives_last_response(self):
+        """Test STOP hook receives last_response (accumulated response text) in metadata."""
+        mock_executor = MagicMock(spec=CLIExecutor)
+        mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+
+        # Include assistant message with text content before result
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "response-test"},
+            {"type": "assistant", "message": {
+                "id": "msg_123",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "The answer is 42."}],
+            }},
+            {"type": "result", "result": "Response", "session_id": "response-test",
+             "duration_ms": 500, "num_turns": 1, "total_cost_usd": 0.0005,
+             "usage": {"input_tokens": 30, "output_tokens": 20}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in events:
+                yield event
+
+        mock_executor.execute = mock_execute
+
+        hook_registry = HookRegistry()
+        captured_response = []
+
+        @hook_registry.on(HookEvent.STOP)
+        async def capture_response(ctx: HookContext) -> HookContext:
+            captured_response.append(ctx.metadata.get("last_response"))
+            return ctx
+
+        session = Session(executor=mock_executor, hooks=hook_registry)
+
+        async for _ in session.send_message("What is the meaning of life?"):
+            pass
+
+        assert len(captured_response) == 1
+        assert captured_response[0] == "The answer is 42."
