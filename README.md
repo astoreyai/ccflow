@@ -97,6 +97,8 @@ print(f"Total tokens: {stats.total_tokens}")
 
 ### Extended Thinking (Ultrathink)
 
+Enable Claude's extended thinking mode for complex reasoning tasks. When enabled, ccflow prepends "ultrathink" to prompts, triggering deeper analysis with visible reasoning chains.
+
 ```python
 from ccflow import query, CLIAgentOptions, ThinkingMessage, TextMessage
 
@@ -108,9 +110,16 @@ options = CLIAgentOptions(
 async for msg in query("Analyze this algorithm for edge cases", options):
     if isinstance(msg, ThinkingMessage):
         print(f"[Thinking: {msg.thinking_tokens} tokens]")
+        print(msg.content[:200])  # View reasoning process
     elif isinstance(msg, TextMessage):
         print(msg.content, end="")
 ```
+
+**When to use ultrathink:**
+- Complex debugging or code analysis
+- Multi-step reasoning problems
+- Architecture decisions
+- Edge case identification
 
 ### Batch Processing
 
@@ -698,4 +707,9 @@ For LLM-friendly documentation, see [LLMS.txt](LLMS.txt).
 - [PyPI](https://pypi.org/project/ccflow/)
 - [Changelog](CHANGELOG.md)
 - [Claude Code CLI](https://code.claude.com/)
+- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)
 - [TOON Format](https://toonformat.dev/)
+
+### Anthropic Engineering References
+- [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices)
+- [Effective Agentic Harnesses](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
