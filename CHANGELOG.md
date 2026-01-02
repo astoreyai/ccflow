@@ -75,6 +75,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_tool_registry()` singleton accessor
 - Integration with SDK MCP server pattern
 
+#### Agentic Harness (Anthropic Best Practices)
+- `FeatureList` - JSON-based feature tracking (harder for model to corrupt than Markdown)
+- `Feature` dataclass with status, priority, tags, notes, error tracking
+- `FeatureStatus` enum: pending, in_progress, passing, failing, blocked, skipped
+- `ProgressTracker` - Cross-session progress logging with timestamps
+- `ProgressEntry` dataclass with action, feature_id, details, git_commit
+- `AgentHarness` - Combined workflow manager
+  - `init_session()` - Initialize with context for agent
+  - `start_feature()` / `complete_feature()` / `fail_feature()` - Feature lifecycle
+  - `status_report()` - Generate report for agent restarts
+- Priority-based feature selection (failing > in_progress > pending)
+- Atomic file saves with temp file + rename
+- `get_harness()` / `init_harness()` / `reset_harness()` singletons
+
 ### Changed
 - Updated architecture to include Agent Layer and Hook Layer
 - Extended `CLIAgentOptions` with agent/skill/hook configuration

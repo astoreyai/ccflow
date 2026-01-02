@@ -343,6 +343,66 @@ async def cmd_status() -> str:
 
 ---
 
+## Agentic Harness (v0.2.0)
+
+Tools for long-running agent workflows based on [Anthropic's best practices](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+
+### Feature Tracking (JSON-based)
+
+```python
+from ccflow import FeatureList, Feature, FeatureStatus
+
+features = FeatureList("features.json", auto_save=True)
+
+# Add features with priority
+features.add(Feature(id="auth", description="OAuth2 login", priority=1))
+features.add(Feature(id="api", description="REST endpoints", priority=2))
+
+# Work through features
+feature = features.next_feature()  # Gets highest priority pending/failing
+features.mark_in_progress(feature.id)
+features.mark_passing(feature.id)  # or mark_failing(id, error="...")
+
+print(f"Progress: {features.progress_percent():.0f}%")
+```
+
+### Progress Tracking (Cross-Session)
+
+```python
+from ccflow import ProgressTracker
+
+tracker = ProgressTracker("progress.json", auto_save=True)
+tracker.set_context(session_id="abc123", agent_name="builder")
+
+tracker.log_feature_started("auth", "Implementing OAuth2")
+tracker.log("checkpoint", feature_id="auth", details="JWT working")
+tracker.log_feature_completed("auth", git_commit="abc123")
+
+# Summary for session restart
+print(tracker.recent_summary(10))
+```
+
+### Combined Harness
+
+```python
+from ccflow import AgentHarness, Feature
+
+harness = AgentHarness(project_dir="my_project", auto_save=True)
+harness.features.add(Feature(id="f1", description="First task"))
+
+# Initialize session (returns context for agent)
+context = harness.init_session("coding-agent", "session-001")
+
+# Feature lifecycle
+harness.start_feature("f1")
+harness.complete_feature(git_commit="abc123")
+
+# Status report for agent restarts
+print(harness.status_report())
+```
+
+---
+
 ## TOON Token Optimization
 
 TOON (Token-Oriented Object Notation) reduces token consumption by 30-60% for structured data:
