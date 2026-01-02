@@ -32,6 +32,7 @@ from ccflow.parser import StreamParser
 from ccflow.store import SessionState, SessionStatus, SessionStore
 from ccflow.toon_integration import ToonSerializer
 from ccflow.types import (
+    AssistantMessage,
     CLIAgentOptions,
     InitMessage,
     Message,
@@ -332,6 +333,13 @@ class Session:
             # Collect response text for integrity tracking
             if isinstance(msg, TextMessage):
                 response_parts.append(msg.content)
+            elif isinstance(msg, AssistantMessage):
+                # Extract text from content blocks
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            response_parts.append(text)
 
             # Run PRE_TOOL_USE hook for tool calls
             if isinstance(msg, ToolUseMessage):

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **STOP hook now includes `last_response` in metadata**: The accumulated response text is now available in `ctx.metadata["last_response"]` when the STOP hook fires. This enables post-processing hooks (e.g., memory recording, analytics) to access the full interaction without needing to collect response parts separately.
+- **Response collection handles AssistantMessage**: Text is now extracted from `AssistantMessage.content` blocks (list of dicts with `type: "text"`), not just `TextMessage.content` strings. This ensures `last_response` is populated when the CLI returns assistant messages.
 
 ### Added
 
