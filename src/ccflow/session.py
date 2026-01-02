@@ -250,10 +250,13 @@ class Session:
         turn_output_tokens = 0
 
         # Run USER_PROMPT_SUBMIT hook
+        # Include context in metadata so hooks can access it (e.g., for emotion adaptation)
+        hook_metadata = {"context": context} if context else {}
         prompt_ctx = HookContext(
             session_id=self._session_id,
             hook_event=HookEvent.USER_PROMPT_SUBMIT,
             prompt=content,
+            metadata=hook_metadata,
         )
         prompt_ctx = await self._hooks.run(HookEvent.USER_PROMPT_SUBMIT, prompt_ctx)
 
