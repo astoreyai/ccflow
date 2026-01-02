@@ -7,7 +7,7 @@ Demonstrates the simplest usage of ccflow - single query with streaming response
 
 import asyncio
 
-from ccflow import query, CLIAgentOptions, TextMessage, AssistantMessage
+from ccflow import AssistantMessage, CLIAgentOptions, TextMessage, query
 
 
 async def main():

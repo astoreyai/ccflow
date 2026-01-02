@@ -179,9 +179,7 @@ class Project:
         if include_subprojects and self._store:
             subprojects = await self._store.get_subprojects(self.project_id)
             for sub in subprojects:
-                sub_traces = await self._trace_store.get_project_traces(
-                    sub.project_id, limit
-                )
+                sub_traces = await self._trace_store.get_project_traces(sub.project_id, limit)
                 traces.extend(sub_traces)
 
         return traces
@@ -219,8 +217,7 @@ class Project:
         opts_dict = trace.options_snapshot.copy()
         if options_override:
             override_dict = {
-                k: v for k, v in self._options_to_dict(options_override).items()
-                if v is not None
+                k: v for k, v in self._options_to_dict(options_override).items() if v is not None
             }
             opts_dict.update(override_dict)
 
@@ -279,8 +276,7 @@ class Project:
         opts_dict = trace.options_snapshot.copy()
         if options_override:
             override_dict = {
-                k: v for k, v in self._options_to_dict(options_override).items()
-                if v is not None
+                k: v for k, v in self._options_to_dict(options_override).items() if v is not None
             }
             opts_dict.update(override_dict)
 

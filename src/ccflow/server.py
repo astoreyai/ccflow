@@ -224,9 +224,7 @@ class CCFlowServer:
         from starlette.middleware.base import BaseHTTPMiddleware
 
         class CorrelationIDMiddleware(BaseHTTPMiddleware):
-            async def dispatch(
-                self, request: Request, call_next: Any
-            ) -> Response:
+            async def dispatch(self, request: Request, call_next: Any) -> Response:
                 # Get or generate correlation ID
                 correlation_id = request.headers.get("X-Correlation-ID")
                 cid = set_correlation_id(correlation_id)

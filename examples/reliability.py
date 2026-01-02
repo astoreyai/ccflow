@@ -7,20 +7,17 @@ for robust Claude CLI interactions.
 """
 
 import asyncio
-import random
 
 from ccflow.reliability import (
     CircuitBreaker,
     CircuitBreakerConfig,
     CircuitBreakerError,
-    CircuitState,
+    HealthChecker,
     RetryConfig,
     RetryExhaustedError,
     retry_with_backoff,
-    with_retry,
-    HealthChecker,
-    get_cli_circuit_breaker,
     set_correlation_id,
+    with_retry,
 )
 
 
@@ -51,7 +48,7 @@ async def demo_circuit_breaker():
             await failing_call()
         except RuntimeError:
             print(f"  Call {i+1} failed, state: {breaker.state}")
-        except CircuitBreakerError as e:
+        except CircuitBreakerError:
             print(f"  Call {i+1} rejected (circuit open)")
 
     print(f"\n  Circuit is now: {breaker.state}")

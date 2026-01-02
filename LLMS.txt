@@ -2,17 +2,18 @@
 
 > Claude Code CLI Middleware - Production Python SDK for Claude Code CLI
 
-ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling subscription-based usage (Pro/Max) with TOON token optimization (30-60% savings).
+ccflow bridges the Claude Code CLI with SDK-like Python interfaces, enabling subscription-based usage (Pro/Max) with TOON token optimization (30-60% savings). Features SDK-compatible agents, hooks, skills, and subagent coordination.
 
 ## Quick Facts
 
-- **Version**: 0.1.0
+- **Version**: 0.2.0
 - **Python**: 3.11+
 - **License**: MIT
 - **Auth**: Uses Claude subscription via CLI OAuth (no API keys needed)
 - **Async**: Fully async/await throughout
-- **Tests**: 855+ tests, 85% coverage
-- **Modules**: 30 source files, 12K LOC
+- **Tests**: 1055+ tests, 86% coverage
+- **Modules**: 36 source files, 14.5K LOC
+- **Exports**: 215 public symbols
 
 ## Installation
 
@@ -26,11 +27,13 @@ pip install "ccflow[all]"            # All extras
 
 ### Simple Query
 ```python
-from ccflow import query_simple
-response = await query_simple("What is 2+2?")
+from ccflow import query, CLIAgentOptions
+
+async for msg in query("What is 2+2?", CLIAgentOptions()):
+    print(msg.content, end="")
 ```
 
-### Streaming Query
+### Streaming Query with Model Selection
 ```python
 from ccflow import query, CLIAgentOptions, TextMessage
 
@@ -70,7 +73,219 @@ async for msg in query("Analyze this complex algorithm", options):
         print(msg.content, end="")
 ```
 
-### Project & Trace Recording
+## Agent System (NEW in 0.2.0)
+
+### Define and Execute Agents
+```python
+from ccflow import Agent, AgentDefinition, AgentRegistry
+
+# Programmatic definition
+agent = Agent(AgentDefinition(
+    name="code-reviewer",
+    description="Reviews code for quality and security",
+    prompt="You are a senior code reviewer. Focus on security and best practices.",
+    tools=["Read", "Grep", "Glob"],
+    model="sonnet",
+))
+
+async for msg in agent.execute("Review auth.py for vulnerabilities"):
+    print(msg.content, end="")
+```
+
+### AgentRegistry with Filesystem Discovery
+```python
+from ccflow import get_agent_registry
+
+# Auto-discovers from ~/.claude/agents/ and .claude/agents/
+registry = get_agent_registry()
+agent_names = registry.list()  # ["code-reviewer", "test-runner", ...]
+agent = registry.get("code-reviewer")
+```
+
+### Agent Definition Files (Markdown + YAML Frontmatter)
+```markdown
+---
+name: code-reviewer
+description: Expert code reviewer for quality and security
+tools:
+  - Read
+  - Grep
+  - Edit
+model: sonnet
+---
+
+# Code Reviewer
+
+You are a senior code reviewer specializing in:
+- Security vulnerabilities
+- Performance issues
+- Code maintainability
+```
+
+## Hook System (NEW in 0.2.0)
+
+SDK-compatible lifecycle hooks for tool execution and session events.
+
+### 6 Hook Event Types
+```python
+from ccflow import HookEvent
+
+HookEvent.PRE_TOOL_USE      # Before tool execution
+HookEvent.POST_TOOL_USE     # After tool execution
+HookEvent.USER_PROMPT_SUBMIT # User submits prompt
+HookEvent.STOP              # Agent stops
+HookEvent.SUBAGENT_STOP     # Subagent finishes
+HookEvent.PRE_COMPACT       # Before context compaction
+```
+
+### Register Hooks with Pattern Matching
+```python
+from ccflow import get_hook_registry, HookEvent, HookContext
+
+hooks = get_hook_registry()
+
+@hooks.on(HookEvent.PRE_TOOL_USE, pattern="Bash.*", priority=10)
+async def audit_bash(ctx: HookContext) -> HookContext:
+    print(f"Bash command: {ctx.tool_input}")
+    return ctx
+
+@hooks.on(HookEvent.POST_TOOL_USE, pattern="Edit|Write")
+async def log_edits(ctx: HookContext) -> HookContext:
+    print(f"Modified: {ctx.tool_input.get('file_path')}")
+    return ctx
+
+@hooks.on(HookEvent.STOP)
+async def on_stop(ctx: HookContext) -> HookContext:
+    print(f"Session {ctx.session_id} stopped: {ctx.stop_reason}")
+    return ctx
+```
+
+### Permission Callback
+```python
+from ccflow import CLIAgentOptions, PermissionResult
+
+async def can_use_tool(tool_name: str, input_data: dict, context) -> PermissionResult:
+    if tool_name == "Bash" and "rm" in str(input_data):
+        return PermissionResult(behavior="deny", reason="Dangerous command")
+    return PermissionResult(behavior="allow")
+
+options = CLIAgentOptions(can_use_tool=can_use_tool)
+```
+
+## Skill System (NEW in 0.2.0)
+
+### Load and Match Skills
+```python
+from ccflow import get_skill_loader
+
+loader = get_skill_loader()
+
+# Semantic matching against query
+matched = loader.match("help me review this code")
+for skill in matched:
+    print(f"Matched: {skill.name} - {skill.description}")
+
+# Direct lookup
+skill = loader.get("code-reviewer")
+print(skill.instructions)
+
+# Load resources
+template = loader.get_resource("code-reviewer", "templates/review.md")
+```
+
+### Skill Discovery Paths
+```
+~/.claude/skills/my-skill/SKILL.md    # User skills
+.claude/skills/my-skill/SKILL.md      # Project skills
+```
+
+## Subagent Coordination (NEW in 0.2.0)
+
+### Parallel Subagent Execution
+```python
+from ccflow import get_subagent_coordinator
+
+coordinator = get_subagent_coordinator()
+
+# Parallel execution
+results = await coordinator.parallel([
+    ("code-reviewer", "Review auth.py"),
+    ("security-auditor", "Check for vulnerabilities"),
+    ("test-runner", "Run test suite"),
+])
+for result in results:
+    print(result)
+```
+
+### Background Tasks
+```python
+# Spawn in background
+task_id = await coordinator.spawn_background("code-reviewer", "Long analysis")
+
+# Check result later
+task = await coordinator.get_task_result(task_id, wait=True, timeout=60)
+print(task.result)
+
+# Gather all background tasks
+all_results = await coordinator.gather(timeout=120)
+```
+
+## Custom Tools (NEW in 0.2.0)
+
+### @tool Decorator
+```python
+from ccflow import tool, create_sdk_mcp_server
+
+@tool(description="Add two numbers")
+async def add(a: int, b: int) -> int:
+    """Add a and b together."""
+    return a + b
+
+@tool(description="Fetch weather data")
+async def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp": 72, "condition": "sunny"}
+
+# Create MCP server from tools
+server = create_sdk_mcp_server("my-tools", tools=[add, get_weather])
+```
+
+## CLI Commands (NEW in 0.2.0)
+
+### Built-in Commands
+```python
+from ccflow import get_command_registry
+
+registry = get_command_registry()
+
+# List available agents
+result = await registry.execute("agents")
+
+# List skills
+result = await registry.execute("skills")
+
+# List hooks
+result = await registry.execute("hooks")
+
+# Spawn subagent
+result = await registry.execute("spawn", ["code-reviewer", "Review main.py"])
+
+# Get help
+result = await registry.execute("help")
+```
+
+### Register Custom Commands
+```python
+@registry.command("greet", "Greet someone", args=["name"])
+async def greet(name: str = "World") -> str:
+    return f"Hello, {name}!"
+
+# Execute
+result = await registry.execute("greet", ["Aaron"])  # "Hello, Aaron!"
+```
+
+## Project & Trace Recording
+
 ```python
 from ccflow import Project, CLIAgentOptions
 from ccflow.stores import SQLiteProjectStore, SQLiteTraceStore, SQLiteSessionStore
@@ -109,49 +324,69 @@ new_session = await project.replay_as_new(
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  query() batch_query() Session Project TracingSession       │
-├─────────────────────────────────────────────────────────────┤
-│                    Middleware Layer                          │
-│  SessionManager, StreamParser, EventEmitter, CostTracker    │
-├─────────────────────────────────────────────────────────────┤
-│                    Reliability Layer                         │
-│  CircuitBreaker, RateLimiter, RetryHandler, HealthChecker   │
-├─────────────────────────────────────────────────────────────┤
-│                    Persistence Layer                         │
-│  SQLiteSessionStore, SQLiteTraceStore, SQLiteProjectStore   │
-├─────────────────────────────────────────────────────────────┤
-│                    Execution Layer                           │
-│  CLIExecutor, ProcessPool, StreamingPool                    │
-├─────────────────────────────────────────────────────────────┤
-│                    Infrastructure                            │
-│  Claude CLI (subprocess with NDJSON streaming)              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Application Layer                             │
+│  query() batch_query() Session Project TracingSession Agent     │
+├─────────────────────────────────────────────────────────────────┤
+│                    Agent Layer (NEW)                             │
+│  AgentRegistry  SkillLoader  SubagentCoordinator  CommandRegistry│
+├─────────────────────────────────────────────────────────────────┤
+│                    Hook Layer (NEW)                              │
+│  HookRegistry  HookMatcher  HookContext  PermissionCallback      │
+├─────────────────────────────────────────────────────────────────┤
+│                    Middleware Layer                              │
+│  SessionManager, StreamParser, EventEmitter, CostTracker        │
+├─────────────────────────────────────────────────────────────────┤
+│                    Reliability Layer                             │
+│  CircuitBreaker, RateLimiter, RetryHandler, HealthChecker       │
+├─────────────────────────────────────────────────────────────────┤
+│                    Persistence Layer                             │
+│  SQLiteSessionStore, SQLiteTraceStore, SQLiteProjectStore       │
+├─────────────────────────────────────────────────────────────────┤
+│                    Execution Layer                               │
+│  CLIExecutor, ProcessPool, StreamingPool                        │
+├─────────────────────────────────────────────────────────────────┤
+│                    Infrastructure                                │
+│  Claude CLI (subprocess with NDJSON streaming)                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Module Map
+## Module Map (36 Modules)
 
-### Core API (src/ccflow/)
+### Core API
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
-| `api.py` | High-level query functions | `query()`, `batch_query()`, `query_simple()` |
-| `session.py` | Multi-turn conversations | `Session`, `load_session()`, `resume_session()` |
+| `api.py` | High-level query functions | `query()`, `batch_query()` |
+| `session.py` | Multi-turn conversations | `Session`, `load_session()` |
 | `manager.py` | Session lifecycle | `SessionManager`, `get_manager()` |
-| `executor.py` | CLI subprocess handling | `CLIExecutor`, `get_executor()` |
-| `parser.py` | NDJSON stream parsing | `StreamParser`, `collect_text()`, `collect_thinking()` |
+| `executor.py` | CLI subprocess handling | `CLIExecutor` |
+| `parser.py` | NDJSON stream parsing | `collect_text()`, `collect_thinking()` |
+
+### Agent System (NEW)
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `agent.py` | Specialized agents | `Agent`, `AgentRegistry`, `AgentDefinition` |
+| `skills.py` | Skill discovery | `SkillLoader`, `SkillDefinition` |
+| `subagent.py` | Parallel execution | `SubagentCoordinator`, `SubagentTask` |
+| `commands.py` | CLI commands | `CommandRegistry`, `CommandDefinition` |
+
+### Hook System (NEW)
+| Module | Purpose | Key Exports |
+|--------|---------|-------------|
+| `hooks.py` | Lifecycle hooks | `HookRegistry`, `HookEvent`, `HookContext` |
+| `tools.py` | Custom tools | `tool`, `SdkMcpServer`, `create_sdk_mcp_server()` |
 
 ### Types & Configuration
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
-| `types.py` | Type definitions (50+) | `CLIAgentOptions`, `Message`, `TraceData`, `ProjectData` |
-| `config.py` | Environment settings | `CCFlowSettings`, `get_settings()` |
-| `exceptions.py` | Error hierarchy (11) | `CCFlowError`, `CLITimeoutError`, `SessionNotFoundError` |
+| `types.py` | Type definitions (50+) | `CLIAgentOptions`, `Message`, `AgentDefinition` |
+| `config.py` | Environment settings | `CCFlowSettings` |
+| `exceptions.py` | Error hierarchy (11) | `CCFlowError`, `CLITimeoutError` |
 
 ### Reliability & Limits
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
-| `reliability.py` | Fault tolerance | `CircuitBreaker`, `retry_with_backoff()`, `HealthChecker` |
+| `reliability.py` | Fault tolerance | `CircuitBreaker`, `retry_with_backoff()` |
 | `rate_limiting.py` | Rate/concurrency control | `TokenBucketRateLimiter`, `CombinedLimiter` |
 | `pool.py` | Concurrent execution | `ProcessPool`, `StreamingPool` |
 
@@ -159,41 +394,26 @@ new_session = await project.replay_as_new(
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
 | `project.py` | Hierarchical organization | `Project` |
-| `tracing.py` | Auto trace recording | `TracingSession`, `create_tracing_session()` |
-| `trace_store.py` | Trace/project protocols | `TraceStore`, `ProjectStore` |
+| `tracing.py` | Auto trace recording | `TracingSession` |
+| `trace_store.py` | Store protocols | `TraceStore`, `ProjectStore` |
 
-### Storage (src/ccflow/stores/)
+### Storage
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
-| `sqlite.py` | SQLite session storage | `SQLiteSessionStore` |
-| `traces.py` | SQLite trace/project storage | `SQLiteTraceStore`, `SQLiteProjectStore` |
-| `memory.py` | In-memory storage | `MemorySessionStore` |
+| `stores/sqlite.py` | SQLite storage | `SQLiteSessionStore` |
+| `stores/traces.py` | Trace storage | `SQLiteTraceStore`, `SQLiteProjectStore` |
+| `stores/memory.py` | In-memory storage | `MemorySessionStore` |
 
 ### Observability
 | Module | Purpose | Key Exports |
 |--------|---------|-------------|
-| `events.py` | Event pub/sub (15 types) | `EventEmitter`, `EventType`, `CostTracker` |
-| `pricing.py` | Cost calculation | `calculate_cost()`, `ModelPricing`, `UsageStats` |
-| `metrics.py` | Prometheus metrics | `record_request()`, `metric_timer()` |
-| `metrics_handlers.py` | Event→Prometheus bridge | `PrometheusEventHandler` |
+| `events.py` | Event pub/sub (18 types) | `EventEmitter`, `EventType` |
+| `pricing.py` | Cost calculation | `calculate_cost()`, `ModelPricing` |
+| `metrics_handlers.py` | Prometheus bridge | `PrometheusEventHandler` |
 
-### Features
-| Module | Purpose | Key Exports |
-|--------|---------|-------------|
-| `toon_integration.py` | Token optimization | `ToonSerializer` |
-| `permissions.py` | CLI permission mapping | `PermissionTranslator` |
-| `mcp.py` | MCP server config | `MCPConfigManager` |
-| `api_client.py` | API fallback (optional) | `APIClient`, `FallbackExecutor` |
+## Configuration (48 Fields)
 
-### CLI & Server
-| Module | Purpose | Key Exports |
-|--------|---------|-------------|
-| `cli.py` | Command-line interface | `main()` |
-| `server.py` | FastAPI HTTP/WebSocket | `create_app()` |
-
-## Configuration
-
-### CLIAgentOptions (40+ fields)
+### CLIAgentOptions
 ```python
 CLIAgentOptions(
     # Model
@@ -208,17 +428,23 @@ CLIAgentOptions(
     permission_mode=PermissionMode.DEFAULT,
     allowed_tools=["Read", "Edit"],
     disallowed_tools=["Bash(rm:*)"],
+    can_use_tool=my_callback,    # Permission callback (NEW)
 
     # Session
-    session_id=None,             # Specific session UUID
-    resume=False,                # Resume previous session
+    session_id=None,
+    resume=False,
+    fork_session=False,
 
     # Limits
-    max_turns=10,
+    max_turns=10,                # Turn limit (NEW)
+    max_budget_usd=1.0,
     timeout=300.0,
 
+    # Working directory
+    cwd="/path/to/project",      # Working directory (NEW)
+
     # Extended thinking
-    ultrathink=False,            # Enable deep reasoning
+    ultrathink=False,
 
     # Context
     context={"data": "value"},   # Auto-TOON encoded
@@ -226,19 +452,14 @@ CLIAgentOptions(
 
     # MCP
     mcp_servers={"github": MCPServerConfig(...)},
+
+    # Agent (NEW)
+    agent="code-reviewer",       # Use specific agent
+    agents={"custom": {...}},    # Custom agent definitions
 )
 ```
 
-### Environment Variables
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CCFLOW_DEFAULT_MODEL` | Default model | `sonnet` |
-| `CCFLOW_DEFAULT_TIMEOUT` | Timeout (seconds) | `300` |
-| `CCFLOW_TOON_ENABLED` | Enable TOON encoding | `true` |
-| `CCFLOW_LOG_LEVEL` | Logging level | `INFO` |
-| `CCFLOW_ENABLE_METRICS` | Enable Prometheus | `true` |
-
-## Message Types (11)
+## Message Types (15)
 
 ```python
 Message = (
@@ -253,144 +474,31 @@ Message = (
     AssistantMessage |      # Full assistant response
     UserMessage |           # User message echo
     ResultMessage |         # Final result
-    UnknownMessage          # Forward-compatible fallback
+    UnknownMessage |        # Forward-compatible fallback
+    UnknownSystemMessage    # System message fallback
 )
 ```
 
-### Common Pattern
-```python
-async for msg in query("prompt", options):
-    if isinstance(msg, TextMessage):
-        print(msg.content, end="")
-    elif isinstance(msg, ThinkingMessage):
-        print(f"[Thinking: {msg.thinking_tokens} tokens]")
-    elif isinstance(msg, ToolUseMessage):
-        print(f"Tool: {msg.tool}({msg.args})")
-    elif isinstance(msg, StopMessage):
-        print(f"\nTokens: {msg.usage}")
-```
-
-## Data Types
-
-### TraceData
-```python
-@dataclass
-class TraceData:
-    trace_id: str
-    session_id: str
-    project_id: str | None
-    sequence_number: int
-    prompt: str
-    response: str
-    thinking: str
-    tool_calls: list[dict]
-    message_stream: list[dict] | None  # When detailed=True
-    input_tokens: int
-    output_tokens: int
-    thinking_tokens: int
-    cost_usd: float
-    duration_ms: int
-    status: TraceStatus  # pending, success, error, cancelled
-```
-
-### ProjectData
-```python
-@dataclass
-class ProjectData:
-    project_id: str
-    name: str
-    description: str
-    parent_project_id: str | None  # For nesting
-    metadata: dict
-    created_at: str
-    updated_at: str
-```
-
-## Reliability Features
-
-### Rate Limiting
-```python
-from ccflow import CombinedLimiter
-
-limiter = CombinedLimiter(rate=10.0, max_concurrent=5)
-async with limiter.acquire():
-    # rate-limited operation
-```
-
-### Circuit Breaker
-```python
-from ccflow import CircuitBreaker, CircuitBreakerConfig
-
-breaker = CircuitBreaker(CircuitBreakerConfig(
-    failure_threshold=5,
-    recovery_timeout=30.0,
-))
-async with breaker.call():
-    # protected operation
-```
-
-### Retry with Backoff
-```python
-from ccflow import retry_with_backoff, RetryConfig
-
-result = await retry_with_backoff(
-    async_func,
-    RetryConfig(max_retries=3, base_delay=1.0, exponential=True),
-)
-```
-
-## Cost Tracking
+## Event Types (18)
 
 ```python
-from ccflow import calculate_cost, get_usage_tracker, ModelTier
-
-# Single calculation
-cost = calculate_cost("sonnet", input_tokens=1000, output_tokens=500)
-# Returns: $0.0105
-
-# Cumulative tracking
-tracker = get_usage_tracker()
-tracker.add("sonnet", input_tokens=1000, output_tokens=500)
-print(f"Total: ${tracker.total_cost_usd:.4f}")
-print(f"By model: {tracker.by_model}")
+EventType.SESSION_CREATED     # Session started
+EventType.SESSION_RESUMED     # Session resumed
+EventType.SESSION_CLOSED      # Session closed
+EventType.SESSION_ERROR       # Session error
+EventType.TURN_STARTED        # Turn began
+EventType.TURN_COMPLETED      # Turn finished
+EventType.THINKING_RECEIVED   # Thinking tokens
+EventType.TOOL_CALLED         # Tool invocation
+EventType.TOOL_RESULT         # Tool result
+EventType.TOKENS_USED         # Token consumption
+EventType.COST_INCURRED       # Cost tracked
+EventType.SESSION_PERSISTED   # Session saved
+EventType.SESSION_LOADED      # Session loaded
+EventType.SESSION_DELETED     # Session deleted
 ```
 
-## Events
-
-```python
-from ccflow import get_emitter, EventType
-
-emitter = get_emitter()
-
-@emitter.on(EventType.TURN_COMPLETED)
-async def on_turn(event):
-    print(f"Turn completed: {event.input_tokens} in, {event.output_tokens} out")
-
-@emitter.on(EventType.THINKING_RECEIVED)
-async def on_thinking(event):
-    print(f"Thinking: {event.thinking_tokens} tokens")
-```
-
-## Storage
-
-```python
-from ccflow import SQLiteSessionStore, MemorySessionStore
-from ccflow.stores import SQLiteTraceStore, SQLiteProjectStore
-
-# Session storage
-session_store = SQLiteSessionStore("sessions.db")
-
-# Trace storage
-trace_store = SQLiteTraceStore("sessions.db")
-
-# Project storage
-project_store = SQLiteProjectStore("sessions.db")
-
-# In-memory (testing)
-memory_store = MemorySessionStore()
-```
-
-## Exceptions
+## Exceptions (13)
 
 ```
 CCFlowError (base)
@@ -409,6 +517,60 @@ CCFlowError (base)
 └── ConcurrencyLimitExceededError  # Max concurrent reached
 ```
 
+## Design Patterns (10)
+
+| Pattern | Implementation | Purpose |
+|---------|----------------|---------|
+| Singleton | `get_*()` / `reset_*()` | Global service instances |
+| Registry | `AgentRegistry`, `HookRegistry` | Dynamic registration |
+| Circuit Breaker | `CircuitBreaker` | Fault tolerance |
+| Token Bucket | `TokenBucketRateLimiter` | Rate limiting |
+| Observer | `EventEmitter`, `HookRegistry` | Event handling |
+| Strategy | `can_use_tool` callback | Pluggable permissions |
+| Facade | `query()`, `Session` | Simplified API |
+| Template Method | Store protocols | Pluggable backends |
+| Decorator | `@tool`, `@hooks.on()` | Functional decoration |
+| Factory | `create_sdk_mcp_server()` | Object creation |
+
+## Best Practices (Anthropic Guidelines)
+
+### Session Management
+- Clear session boundaries with `/clear`
+- Use `CLAUDE.md` for environment instructions
+- Track progress between sessions
+- Git commit checkpoints for recovery
+
+### Error Handling
+- Graceful degradation with circuit breaker
+- Retry with exponential backoff
+- Proper exception hierarchies
+- Transient error detection
+
+### Observability
+- Structured logging (structlog)
+- Prometheus metrics integration
+- Correlation IDs for tracing
+- Event pub/sub system
+
+### Token Optimization
+- TOON encoding for context (30-60% savings)
+- Efficient data structures
+- Streaming responses
+- Context management
+
+## Testing
+
+```bash
+# Run all tests (1055+)
+pytest tests/ -v
+
+# With coverage
+pytest tests/ --cov=ccflow --cov-report=term-missing
+
+# Skip slow/integration
+pytest tests/ -m "not slow and not integration"
+```
+
 ## CLI Usage
 
 ```bash
@@ -418,9 +580,6 @@ ccflow "Explain this code"
 # With model selection
 ccflow -m opus "Review for security"
 
-# Streaming mode
-ccflow --stream "Analyze the codebase"
-
 # Session management
 ccflow sessions --list
 ccflow sessions --resume <session-id>
@@ -429,76 +588,9 @@ ccflow sessions --resume <session-id>
 ccflow server --port 8080
 ```
 
-## File Structure
-
-```
-src/ccflow/
-├── __init__.py           # 172 public exports
-├── api.py                # query(), batch_query()
-├── session.py            # Session class (562 LOC)
-├── manager.py            # SessionManager (565 LOC)
-├── executor.py           # CLIExecutor (592 LOC)
-├── parser.py             # StreamParser, helpers
-├── types.py              # 50+ dataclasses/enums (615 LOC)
-├── config.py             # CCFlowSettings
-├── exceptions.py         # 11 exception classes
-├── events.py             # EventEmitter, 15 event types (588 LOC)
-├── reliability.py        # CircuitBreaker, retry (766 LOC)
-├── rate_limiting.py      # Limiters (744 LOC)
-├── pool.py               # ProcessPool (772 LOC)
-├── pricing.py            # Cost calculation (414 LOC)
-├── project.py            # Project class (460 LOC)
-├── tracing.py            # TracingSession
-├── trace_store.py        # Store protocols (399 LOC)
-├── toon_integration.py   # ToonSerializer
-├── permissions.py        # PermissionTranslator
-├── mcp.py                # MCPConfigManager
-├── api_client.py         # APIClient, FallbackExecutor (624 LOC)
-├── metrics.py            # Prometheus metrics
-├── metrics_handlers.py   # Event→Prometheus (392 LOC)
-├── cli.py                # CLI entry point (611 LOC)
-├── server.py             # FastAPI server (741 LOC)
-└── stores/
-    ├── __init__.py       # Store exports
-    ├── sqlite.py         # SQLiteSessionStore
-    ├── traces.py         # SQLiteTraceStore, SQLiteProjectStore
-    └── memory.py         # MemorySessionStore
-```
-
-## Testing
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# With coverage
-pytest tests/ --cov=ccflow --cov-report=term-missing
-
-# Specific module
-pytest tests/test_tracing.py -v
-
-# Skip slow/integration tests
-pytest tests/ -m "not slow and not integration"
-```
-
-## Docker
-
-```bash
-# Build
-docker build -t ccflow .
-
-# Run (mount Claude credentials)
-docker run -v ~/.claude:/home/ccflow/.claude ccflow
-
-# Docker Compose (with Prometheus/Grafana)
-docker compose up
-```
-
 ## Links
 
 - **API Docs**: docs/api.md
 - **Architecture**: docs/architecture.md
 - **TOON Spec**: docs/TOON_RESEARCH.md
 - **Changelog**: CHANGELOG.md
-- **Source**: src/ccflow/
-- **Tests**: tests/

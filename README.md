@@ -10,6 +10,8 @@
 
 ccflow enables **subscription-based usage** (Pro/Max) instead of API token billing, with integrated TOON serialization for **30-60% token reduction** on structured data.
 
+**v0.2.0**: Now with **Agent System**, **Hooks**, **Skills**, **Subagent Coordination**, and **CLI Commands** - full SDK parity!
+
 ---
 
 ## Why ccflow?
@@ -124,6 +126,223 @@ for result in results:
 
 ---
 
+## Agent System (v0.2.0)
+
+Define specialized agents with isolated tools, models, and system prompts:
+
+### Programmatic Definition
+
+```python
+from ccflow import Agent, AgentDefinition, CLIAgentOptions
+
+# Define agent
+reviewer = Agent(AgentDefinition(
+    name="code-reviewer",
+    description="Expert code reviewer for quality and security",
+    system_prompt="You are a senior code reviewer focused on security...",
+    tools=["Read", "Grep", "Glob"],
+    model="sonnet",
+))
+
+# Execute task
+async for msg in reviewer.execute("Review auth.py for security issues"):
+    print(msg.content, end="")
+```
+
+### Filesystem Agents (YAML Frontmatter)
+
+Create `~/.claude/agents/code-reviewer.md`:
+
+```markdown
+---
+name: code-reviewer
+description: Expert code reviewer for quality and security
+model: sonnet
+tools:
+  - Read
+  - Grep
+  - Glob
+permission_mode: default
+timeout: 300
+---
+
+# Code Reviewer
+
+You are a senior code reviewer...
+```
+
+```python
+from ccflow import get_agent_registry
+
+# Auto-discovered from ~/.claude/agents/
+registry = get_agent_registry()
+agent = registry.get("code-reviewer")
+```
+
+---
+
+## Hook System (v0.2.0)
+
+SDK-compatible lifecycle hooks for tool execution and session events:
+
+```python
+from ccflow import get_hook_registry, HookEvent, HookContext
+
+hooks = get_hook_registry()
+
+# Audit all Bash commands
+@hooks.on(HookEvent.PRE_TOOL_USE, pattern="Bash.*")
+async def audit_bash(ctx: HookContext) -> HookContext:
+    print(f"Bash command: {ctx.tool_input}")
+    return ctx
+
+# Log all tool results
+@hooks.on(HookEvent.POST_TOOL_USE)
+async def log_results(ctx: HookContext) -> HookContext:
+    print(f"Tool {ctx.tool_name} returned: {ctx.tool_result[:100]}...")
+    return ctx
+
+# Session end cleanup
+@hooks.on(HookEvent.STOP)
+async def cleanup(ctx: HookContext) -> None:
+    print(f"Session {ctx.session_id} ended: {ctx.stop_reason}")
+```
+
+### Hook Events
+
+| Event | Description |
+|-------|-------------|
+| `PRE_TOOL_USE` | Before tool execution (can modify input) |
+| `POST_TOOL_USE` | After tool execution (can modify result) |
+| `USER_PROMPT_SUBMIT` | User submits prompt |
+| `STOP` | Agent stops execution |
+| `SUBAGENT_STOP` | Subagent finishes |
+| `PRE_COMPACT` | Before context compaction |
+
+---
+
+## Skill System (v0.2.0)
+
+Domain knowledge with semantic matching (SKILL.md format):
+
+### Define Skill
+
+Create `~/.claude/skills/security-audit/SKILL.md`:
+
+```markdown
+---
+name: security-audit
+description: Security vulnerability analysis and OWASP compliance
+keywords:
+  - security
+  - vulnerability
+  - OWASP
+---
+
+# Security Audit Skill
+
+When analyzing code for security issues:
+1. Check for injection vulnerabilities
+2. Verify authentication flows
+3. Audit authorization controls
+...
+```
+
+### Use Skills
+
+```python
+from ccflow import get_skill_loader
+
+loader = get_skill_loader()
+
+# Semantic matching
+skills = loader.match("check for vulnerabilities")
+for skill in skills:
+    print(f"Matched: {skill.name}")
+
+# Load full content
+skill = loader.load_full("security-audit")
+print(skill.instructions)
+```
+
+---
+
+## Subagent Coordination (v0.2.0)
+
+Run multiple agents in parallel with concurrency control:
+
+```python
+from ccflow import get_subagent_coordinator
+
+coordinator = get_subagent_coordinator()
+
+# Parallel execution with semaphore-based concurrency
+results = await coordinator.parallel([
+    ("code-reviewer", "Review auth.py"),
+    ("security-auditor", "Check for vulnerabilities"),
+    ("test-runner", "Run test suite"),
+])
+
+for result in results:
+    print(result)
+```
+
+### Background Tasks
+
+```python
+# Spawn background task
+task_id = await coordinator.spawn_background(
+    "code-reviewer",
+    "Review the entire codebase"
+)
+
+# Do other work...
+
+# Get result when ready
+task = await coordinator.get_task_result(task_id, wait=True)
+print(f"Status: {task.status}, Result: {task.result}")
+
+# Cancel if needed
+coordinator.cancel(task_id)
+```
+
+---
+
+## CLI Commands (v0.2.0)
+
+Built-in `/command` system:
+
+```bash
+# List available agents
+ccflow /agents
+
+# List available skills
+ccflow /skills
+
+# Spawn subagent
+ccflow /spawn code-reviewer "Review main.py"
+
+# List registered hooks
+ccflow /hooks
+
+# Show help
+ccflow /help
+```
+
+### Register Custom Commands
+
+```python
+from ccflow import get_command_registry
+
+registry = get_command_registry()
+
+@registry.command("status", "Show project status")
+async def cmd_status() -> str:
+    return "All systems operational"
+```
+
+---
+
 ## TOON Token Optimization
 
 TOON (Token-Oriented Object Notation) reduces token consumption by 30-60% for structured data:
@@ -198,25 +417,39 @@ new_session = await project.replay_as_new(
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Your Python Application                   │
-└─────────────────────────────────┬───────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Your Python Application                     │
+│   agent = Agent("code-reviewer", tools=["Read", "Grep"])        │
+│   async for msg in agent.execute("Review auth.py"):             │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                     Agent Layer (v0.2.0)                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
+│  │ AgentRegistry│  │ SkillLoader  │  │ SubagentCoordinator   │  │
+│  │ .register()  │  │ .match()     │  │ .spawn() .parallel()  │  │
+│  └──────────────┘  └──────────────┘  └───────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│                     Hook Layer (v0.2.0)                          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ HookRegistry: pre_tool, post_tool, stop, subagent_stop   │   │
+│  │ HookMatcher: tool pattern matching, async callbacks      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────┤
+│                      ccflow Core Layer                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐      │
+│  │ query()     │  │ Session     │  │ ToonSerializer      │      │
+│  │ batch_query │  │ .send()     │  │ .encode()           │      │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘      │
+│                          │                                       │
+│  ┌───────────────────────▼──────────────────────────────┐       │
+│  │ CLI Executor (asyncio subprocess + NDJSON streaming) │       │
+│  └───────────────────────────────────────────────────────┘      │
+└─────────────────────────────────┬───────────────────────────────┘
                                   │
-┌─────────────────────────────────▼───────────────────────────┐
-│                      ccflow Middleware                       │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ query()     │  │ Session     │  │ ToonSerializer      │  │
-│  │ batch_query │  │ .send()     │  │ .encode()           │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-│                          │                                   │
-│  ┌───────────────────────▼──────────────────────────────┐   │
-│  │ CLI Executor (asyncio subprocess + NDJSON streaming) │   │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────┬───────────────────────────┘
-                                  │
-┌─────────────────────────────────▼───────────────────────────┐
-│  claude -p "prompt" --output-format stream-json --resume    │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────▼───────────────────────────────┐
+│  claude -p "prompt" --output-format stream-json --resume        │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---

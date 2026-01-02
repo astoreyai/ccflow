@@ -8,7 +8,7 @@ with session statistics tracking.
 
 import asyncio
 
-from ccflow import Session, CLIAgentOptions, TextMessage
+from ccflow import CLIAgentOptions, Session, TextMessage
 from ccflow.types import PermissionMode
 
 

@@ -318,7 +318,9 @@ def extract_thinking_tokens(events: list[dict[str, Any]]) -> int:
         if event.get("type") == "thinking":
             total += event.get("thinking_tokens", 0)
         # Check for usage in stop/result events
-        elif (event.get("type") == "system" and event.get("subtype") == "stop") or event.get("type") == "result":
+        elif (event.get("type") == "system" and event.get("subtype") == "stop") or event.get(
+            "type"
+        ) == "result":
             usage = event.get("usage", {})
             total += usage.get("thinking_tokens", 0)
     return total

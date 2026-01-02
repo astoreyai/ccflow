@@ -8,9 +8,9 @@ into Claude prompts.
 
 import asyncio
 
-from ccflow import query, CLIAgentOptions, TextMessage
+from ccflow import CLIAgentOptions, TextMessage, query
+from ccflow.toon_integration import TOON_AVAILABLE, ToonSerializer, should_use_toon
 from ccflow.types import ToonConfig
-from ccflow.toon_integration import ToonSerializer, should_use_toon, TOON_AVAILABLE
 
 
 async def main():

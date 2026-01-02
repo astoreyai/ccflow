@@ -27,6 +27,7 @@ from ccflow.events import (
     get_emitter,
 )
 from ccflow.executor import CLIExecutor, get_executor
+from ccflow.hooks import HookContext, HookEvent, HookRegistry, get_hook_registry
 from ccflow.parser import StreamParser
 from ccflow.store import SessionState, SessionStatus, SessionStore
 from ccflow.toon_integration import ToonSerializer
@@ -37,6 +38,8 @@ from ccflow.types import (
     SessionStats,
     StopMessage,
     TextMessage,
+    ToolResultMessage,
+    ToolUseMessage,
 )
 
 if TYPE_CHECKING:
@@ -75,6 +78,7 @@ class Session:
         executor: CLIExecutor | None = None,
         store: SessionStore | None = None,
         emitter: EventEmitter | None = None,
+        hooks: HookRegistry | None = None,
     ) -> None:
         """Initialize session.
 
@@ -84,6 +88,7 @@ class Session:
             executor: CLI executor instance (uses default if None)
             store: Optional session store for persistence
             emitter: Optional event emitter (uses global if None)
+            hooks: Optional hook registry (uses global if None)
         """
         self._session_id = session_id or str(uuid.uuid4())
         self._options = options or CLIAgentOptions()
@@ -92,6 +97,7 @@ class Session:
         self._toon = ToonSerializer(self._options.toon)
         self._store = store
         self._emitter = emitter or get_emitter()
+        self._hooks = hooks or get_hook_registry()
 
         # Statistics
         self._turn_count = 0
@@ -241,12 +247,32 @@ class Session:
         turn_input_tokens = 0
         turn_output_tokens = 0
 
+        # Run USER_PROMPT_SUBMIT hook
+        prompt_ctx = HookContext(
+            session_id=self._session_id,
+            hook_event=HookEvent.USER_PROMPT_SUBMIT,
+            prompt=content,
+        )
+        prompt_ctx = await self._hooks.run(HookEvent.USER_PROMPT_SUBMIT, prompt_ctx)
+
+        # Check if hook blocked the prompt
+        if prompt_ctx.metadata.get("blocked"):
+            logger.info(
+                "prompt_blocked_by_hook",
+                session_id=self._session_id,
+                reason=prompt_ctx.metadata.get("block_reason"),
+            )
+            return
+
+        # Allow hooks to modify the prompt
+        effective_prompt = prompt_ctx.prompt or content
+
         # Emit turn started event
         await self._emit(
             TurnStartedEvent(
                 session_id=self._session_id,
                 turn_number=self._turn_count,
-                prompt=content,
+                prompt=effective_prompt,
             )
         )
 
@@ -274,9 +300,9 @@ class Session:
         )
 
         # Apply ultrathink prefix if enabled
-        effective_content = content
+        effective_content = effective_prompt
         if self._options.ultrathink:
-            effective_content = f"ultrathink {content}"
+            effective_content = f"ultrathink {effective_prompt}"
             logger.debug("ultrathink_enabled", turn=self._turn_count)
 
         # Inject context if provided
@@ -306,7 +332,73 @@ class Session:
             if isinstance(msg, TextMessage):
                 response_parts.append(msg.content)
 
-            # Track usage from stop message
+            # Run PRE_TOOL_USE hook for tool calls
+            if isinstance(msg, ToolUseMessage):
+                tool_ctx = HookContext(
+                    session_id=self._session_id,
+                    hook_event=HookEvent.PRE_TOOL_USE,
+                    tool_name=msg.tool,
+                    tool_input=msg.args,
+                    message=msg,
+                )
+                tool_ctx = await self._hooks.run(HookEvent.PRE_TOOL_USE, tool_ctx)
+
+                # Check if hook blocked the tool
+                if tool_ctx.metadata.get("blocked"):
+                    logger.info(
+                        "tool_blocked_by_hook",
+                        tool=msg.tool,
+                        reason=tool_ctx.metadata.get("block_reason"),
+                    )
+                    # Still yield the message but mark it as blocked
+                    if msg.metadata is None:
+                        msg.metadata = {}
+                    msg.metadata["blocked"] = True
+                    msg.metadata["block_reason"] = tool_ctx.metadata.get("block_reason")
+
+                # Run can_use_tool callback if defined
+                elif self._options.can_use_tool is not None:
+                    import inspect
+
+                    try:
+                        callback = self._options.can_use_tool
+                        result = callback(msg.tool, msg.args or {}, tool_ctx)
+                        if inspect.iscoroutine(result):
+                            result = await result
+
+                        if result.behavior == "deny":
+                            if msg.metadata is None:
+                                msg.metadata = {}
+                            msg.metadata["blocked"] = True
+                            msg.metadata["block_reason"] = (
+                                result.message or "Denied by permission callback"
+                            )
+                            logger.info(
+                                "tool_blocked_by_callback",
+                                tool=msg.tool,
+                                reason=result.message,
+                            )
+                        elif result.updated_input is not None:
+                            msg.args = result.updated_input
+                    except Exception as e:
+                        logger.warning(
+                            "can_use_tool_callback_error",
+                            tool=msg.tool,
+                            error=str(e),
+                        )
+
+            # Run POST_TOOL_USE hook for tool results
+            if isinstance(msg, ToolResultMessage):
+                result_ctx = HookContext(
+                    session_id=self._session_id,
+                    hook_event=HookEvent.POST_TOOL_USE,
+                    tool_name=msg.tool,
+                    tool_result=msg.result,
+                    message=msg,
+                )
+                await self._hooks.run(HookEvent.POST_TOOL_USE, result_ctx)
+
+            # Track usage and run STOP hook from stop message
             if isinstance(msg, StopMessage):
                 turn_input_tokens = msg.usage.get("input_tokens", 0)
                 turn_output_tokens = msg.usage.get("output_tokens", 0)
@@ -318,6 +410,15 @@ class Session:
                     input_tokens=turn_input_tokens,
                     output_tokens=turn_output_tokens,
                 )
+
+                # Run STOP hook
+                stop_ctx = HookContext(
+                    session_id=self._session_id,
+                    hook_event=HookEvent.STOP,
+                    stop_reason=msg.stop_reason,
+                    message=msg,
+                )
+                await self._hooks.run(HookEvent.STOP, stop_ctx)
 
             yield msg
 

@@ -274,9 +274,7 @@ class CircuitBreaker:
             await self._record_failure(e)
             raise
 
-    def protect(
-        self, func: Callable[..., Awaitable[T]]
-    ) -> Callable[..., Awaitable[T]]:
+    def protect(self, func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         """Decorator to protect an async function with circuit breaker.
 
         Example:

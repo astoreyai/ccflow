@@ -13,15 +13,13 @@ Use cases:
 """
 
 import asyncio
-from datetime import datetime
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
-from ccflow import Session, CLIAgentOptions, query, TextMessage, AssistantMessage
+from ccflow import AssistantMessage, CLIAgentOptions, Session, TextMessage
 from ccflow.session import load_session
-from ccflow.store import SessionState, SessionStatus
-from ccflow.stores.sqlite import SQLiteSessionStore
 from ccflow.stores.memory import MemorySessionStore
+from ccflow.stores.sqlite import SQLiteSessionStore
 
 
 def extract_text(msg) -> str:
@@ -206,7 +204,7 @@ Provide a cohesive summary that integrates all the key points."""
     async for msg in synthesis_session.send_message(synthesis_prompt):
         synthesis_response += extract_text(msg)
 
-    print(f"\n  Synthesized Summary:")
+    print("\n  Synthesized Summary:")
     print(f"  {'-' * 50}")
     print(f"  {synthesis_response}")
     print(f"  {'-' * 50}")

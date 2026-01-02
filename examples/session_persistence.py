@@ -6,14 +6,14 @@ Demonstrates saving and restoring sessions using SQLite and in-memory stores.
 """
 
 import asyncio
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-import tempfile
 
-from ccflow import Session, CLIAgentOptions, get_manager, init_manager
-from ccflow.store import SessionState, SessionStatus, SessionFilter
-from ccflow.stores.sqlite import SQLiteSessionStore
+from ccflow import init_manager
+from ccflow.store import SessionFilter, SessionState, SessionStatus
 from ccflow.stores.memory import MemorySessionStore
+from ccflow.stores.sqlite import SQLiteSessionStore
 
 
 async def demo_memory_store():
@@ -85,7 +85,7 @@ async def demo_sqlite_store():
         )
         await store.save(state)
 
-    print(f"  Created 3 sessions")
+    print("  Created 3 sessions")
 
     # List all
     all_sessions = await store.list()
@@ -198,7 +198,7 @@ async def demo_session_resume():
 
     loaded = await store.load(session_id)
     if loaded:
-        print(f"  Second run: resumed session")
+        print("  Second run: resumed session")
         print(f"    Turn count: {loaded.turn_count}")
         print(f"    Total tokens: {loaded.total_input_tokens + loaded.total_output_tokens}")
         print(f"    Last prompt: {loaded.last_prompt[:30]}...")

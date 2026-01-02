@@ -220,11 +220,7 @@ def should_use_toon(data: Any) -> bool:
 
     # Check for uniform arrays (TOON's sweet spot)
     def has_uniform_array(obj: Any) -> bool:
-        if (
-            isinstance(obj, list)
-            and len(obj) > 3
-            and all(isinstance(item, dict) for item in obj)
-        ):
+        if isinstance(obj, list) and len(obj) > 3 and all(isinstance(item, dict) for item in obj):
             keys = [frozenset(item.keys()) for item in obj]
             if len(set(keys)) == 1:
                 return True

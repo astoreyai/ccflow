@@ -7,7 +7,7 @@ Demonstrates concurrent batch query processing for multiple prompts.
 
 import asyncio
 
-from ccflow import batch_query, CLIAgentOptions
+from ccflow import CLIAgentOptions, batch_query
 
 
 async def main():

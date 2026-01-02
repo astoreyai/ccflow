@@ -13,14 +13,13 @@ import sys
 
 # Check for server dependencies
 try:
-    from fastapi import FastAPI
     import uvicorn
+    from fastapi import FastAPI
 except ImportError:
     print("This example requires server extras:")
     print("  pip install ccflow[server]")
     sys.exit(1)
 
-from ccflow import CLIAgentOptions
 from ccflow.server import CCFlowServer
 
 

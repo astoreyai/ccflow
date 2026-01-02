@@ -8,18 +8,17 @@ Demonstrates the event system for observability and custom integrations.
 import asyncio
 from datetime import datetime
 
-from ccflow import Session, CLIAgentOptions
 from ccflow.events import (
+    CostIncurredEvent,
+    Event,
     EventEmitter,
     EventType,
-    Event,
-    SessionCreatedEvent,
     SessionClosedEvent,
-    TurnStartedEvent,
-    TurnCompletedEvent,
+    SessionCreatedEvent,
     TokensUsedEvent,
-    CostIncurredEvent,
     ToolCalledEvent,
+    TurnCompletedEvent,
+    TurnStartedEvent,
     get_emitter,
 )
 
@@ -200,7 +199,7 @@ async def demo_metrics_collector():
         duration_seconds=1.5,
     ))
 
-    print(f"\n  Final metrics:")
+    print("\n  Final metrics:")
     print(f"    Total tokens: {collector.total_tokens}")
     print(f"    Total cost: ${collector.total_cost:.4f}")
     print(f"    Sessions: {collector.sessions_created}")

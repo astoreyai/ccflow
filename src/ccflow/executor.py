@@ -290,7 +290,19 @@ class CLIExecutor:
             flags.extend(["--agent", options.agent])
 
         if options.agents:
-            flags.extend(["--agents", json.dumps(options.agents)])
+            # Convert AgentDefinition objects to SDK-compatible dicts
+            agents_dict = {}
+            for name, agent in options.agents.items():
+                if hasattr(agent, "to_sdk_dict"):
+                    agents_dict[name] = agent.to_sdk_dict()
+                else:
+                    # Already a dict
+                    agents_dict[name] = agent
+            flags.extend(["--agents", json.dumps(agents_dict)])
+
+        # Max turns
+        if getattr(options, "max_turns", None) is not None:
+            flags.extend(["--max-turns", str(options.max_turns)])
 
         # Beta features
         if options.betas:

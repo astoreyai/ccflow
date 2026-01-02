@@ -171,11 +171,13 @@ class TracingSession(Session):
             async for msg in super().send_message(content, context):
                 # Capture message-level detail if enabled
                 if capture_detail and message_stream is not None:
-                    message_stream.append({
-                        "type": type(msg).__name__,
-                        "timestamp_ms": int((time.monotonic() - start_time) * 1000),
-                        "data": self._message_to_dict(msg),
-                    })
+                    message_stream.append(
+                        {
+                            "type": type(msg).__name__,
+                            "timestamp_ms": int((time.monotonic() - start_time) * 1000),
+                            "data": self._message_to_dict(msg),
+                        }
+                    )
 
                 # Collect content by type
                 if isinstance(msg, TextMessage):
@@ -184,10 +186,12 @@ class TracingSession(Session):
                     thinking_parts.append(msg.content)
                     self._current_trace.thinking_tokens += msg.thinking_tokens
                 elif isinstance(msg, ToolUseMessage):
-                    tool_calls.append({
-                        "name": msg.tool,
-                        "args": msg.args,
-                    })
+                    tool_calls.append(
+                        {
+                            "name": msg.tool,
+                            "args": msg.args,
+                        }
+                    )
                 elif isinstance(msg, ToolResultMessage):
                     if tool_calls:
                         tool_calls[-1]["result"] = msg.result

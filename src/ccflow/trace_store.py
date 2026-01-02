@@ -92,9 +92,7 @@ class TraceStore(Protocol):
         """
         ...
 
-    async def get_session_traces(
-        self, session_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_session_traces(self, session_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a session.
 
         Args:
@@ -106,9 +104,7 @@ class TraceStore(Protocol):
         """
         ...
 
-    async def get_project_traces(
-        self, project_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_project_traces(self, project_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a project.
 
         Args:
@@ -283,15 +279,11 @@ class BaseTraceStore(ABC):
         """List traces matching filter criteria."""
         pass
 
-    async def get_session_traces(
-        self, session_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_session_traces(self, session_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a session."""
         return await self.list(TraceFilter(session_id=session_id, limit=limit))
 
-    async def get_project_traces(
-        self, project_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_project_traces(self, project_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a project."""
         return await self.list(TraceFilter(project_id=project_id, limit=limit))
 

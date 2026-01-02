@@ -7,9 +7,13 @@ messages, and results.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from .hooks import HookContext
 
 
 class PermissionMode(str, Enum):
@@ -142,6 +146,7 @@ class CLIAgentOptions:
         plugin_dirs: Directories to load plugins from
         disable_slash_commands: Disable all slash commands
         ultrathink: Enable extended thinking mode (prepends "ultrathink" to prompt)
+        can_use_tool: Permission callback for tool execution (SDK-compatible)
     """
 
     # Model selection
@@ -165,6 +170,7 @@ class CLIAgentOptions:
     # Execution limits
     max_budget_usd: float | None = None
     max_tokens: int | None = None  # Max output tokens (API only)
+    max_turns: int | None = None  # Maximum agentic turns
     timeout: float = 300.0
 
     # Working directory
@@ -223,6 +229,10 @@ class CLIAgentOptions:
     # Extended thinking
     ultrathink: bool = False  # Enable extended thinking mode
 
+    # Permission callback (SDK-compatible)
+    # Called before tool execution to allow/deny/modify
+    can_use_tool: Callable | None = None
+
 
 # Message types matching CLI stream-json output
 
@@ -265,6 +275,7 @@ class ToolUseMessage:
     tool: str
     args: dict[str, Any]
     type: Literal["tool_use"] = "tool_use"
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -274,6 +285,7 @@ class ToolResultMessage:
     tool: str
     result: str
     type: Literal["tool_result"] = "tool_result"
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -293,6 +305,7 @@ class StopMessage:
     usage: dict[str, int]  # {input_tokens, output_tokens}
     type: Literal["system"] = "system"
     subtype: Literal["stop"] = "stop"
+    stop_reason: str | None = None
 
 
 @dataclass
@@ -613,3 +626,107 @@ class ProjectFilter:
     before: str | None = None  # ISO timestamp
     limit: int = 100
     offset: int = 0
+
+
+# ============================================================================
+# Agent System Types (SDK-Compatible)
+# ============================================================================
+
+
+@dataclass
+class AgentDefinition:
+    """Definition of a specialized agent (SDK-compatible).
+
+    Matches Claude Agent SDK's AgentDefinition interface for subagent
+    definitions with ccflow extensions.
+
+    Attributes:
+        description: Natural language description of when to use this agent
+        prompt: The agent's system prompt (instructions)
+        tools: List of allowed tool names (None = inherit all)
+        model: Model override ("sonnet", "opus", "haiku", "inherit", or None)
+
+    ccflow Extensions:
+        name: Unique identifier for the agent
+        permission_mode: Permission mode override
+        timeout: Execution timeout in seconds
+        metadata: Extensible metadata dict
+    """
+
+    # SDK-compatible fields (required)
+    description: str
+    prompt: str
+
+    # SDK-compatible fields (optional)
+    tools: list[str] | None = None
+    model: Literal["sonnet", "opus", "haiku", "inherit"] | None = None
+
+    # ccflow extensions
+    name: str = ""
+    permission_mode: PermissionMode | None = None
+    timeout: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_sdk_dict(self) -> dict[str, Any]:
+        """Convert to SDK-compatible dict for CLI --agents flag."""
+        result: dict[str, Any] = {
+            "description": self.description,
+            "prompt": self.prompt,
+        }
+        if self.tools is not None:
+            result["tools"] = self.tools
+        if self.model is not None:
+            result["model"] = self.model
+        return result
+
+
+@dataclass
+class SkillDefinition:
+    """Definition of a skill (domain knowledge).
+
+    Skills are domain-specific knowledge files in SKILL.md format
+    that can be loaded and matched against queries.
+
+    Attributes:
+        name: Unique identifier (lowercase-hyphen, e.g., "code-reviewer")
+        description: When to use this skill (for semantic matching)
+        instructions: Full SKILL.md content (the skill's instructions)
+        location: Where the skill was loaded from ("user", "project", "plugin")
+        resources_path: Path to resources/ directory (optional)
+        metadata: YAML frontmatter metadata
+    """
+
+    name: str
+    description: str
+    instructions: str
+    location: Literal["user", "project", "plugin"] = "user"
+    resources_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# ============================================================================
+# Permission Callback Types (SDK-Compatible)
+# ============================================================================
+
+
+@dataclass
+class PermissionResult:
+    """Result from a can_use_tool permission callback.
+
+    Attributes:
+        behavior: Action to take ("allow", "deny", or "ask")
+        updated_input: Modified tool input (optional)
+        message: Reason for the decision (optional)
+    """
+
+    behavior: Literal["allow", "deny", "ask"]
+    updated_input: dict[str, Any] | None = None
+    message: str | None = None
+
+
+# Type alias for permission callback
+# Signature: (tool_name, input_data, context) -> PermissionResult
+CanUseTool: TypeAlias = Callable[
+    [str, dict[str, Any], "HookContext"],
+    Awaitable[PermissionResult] | PermissionResult,
+]

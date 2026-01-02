@@ -373,9 +373,7 @@ class SQLiteTraceStore(BaseTraceStore):
             logger.error("trace_list_failed", error=str(e))
             raise SessionStoreError(f"Failed to list traces: {e}") from e
 
-    async def get_session_traces(
-        self, session_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_session_traces(self, session_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a session ordered by sequence."""
         try:
             await self._ensure_initialized()
@@ -399,9 +397,7 @@ class SQLiteTraceStore(BaseTraceStore):
             logger.error("trace_get_session_failed", session_id=session_id, error=str(e))
             raise SessionStoreError(f"Failed to get session traces: {e}") from e
 
-    async def get_project_traces(
-        self, project_id: str, limit: int = 100
-    ) -> List[TraceData]:
+    async def get_project_traces(self, project_id: str, limit: int = 100) -> List[TraceData]:
         """Get all traces for a project."""
         try:
             await self._ensure_initialized()

@@ -8,12 +8,12 @@ Demonstrates programmatic MCP server configuration with ccflow.
 import asyncio
 from pathlib import Path
 
-from ccflow import query, CLIAgentOptions, TextMessage
+from ccflow import CLIAgentOptions, TextMessage, query
 from ccflow.mcp import (
     MCPConfigManager,
     MCPServerConfig,
-    github_server,
     filesystem_server,
+    github_server,
 )
 
 

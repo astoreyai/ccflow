@@ -9,14 +9,13 @@ and prevent overloading Claude.
 import asyncio
 import time
 
-from ccflow import query, CLIAgentOptions  # noqa: F401 - shown in comments
+from ccflow import CLIAgentOptions, query  # noqa: F401 - shown in comments
 from ccflow.rate_limiting import (
-    TokenBucketRateLimiter,
-    SlidingWindowRateLimiter,
-    ConcurrencyLimiter,
     CombinedLimiter,
-    get_limiter,
+    ConcurrencyLimiter,
     RateLimitExceededError,
+    SlidingWindowRateLimiter,
+    TokenBucketRateLimiter,
 )
 
 
