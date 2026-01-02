@@ -6,10 +6,12 @@ import pytest
 
 from ccflow.executor import CLIExecutor
 from ccflow.session import Session, resume_session
+from ccflow.hooks import HookContext, HookEvent, HookRegistry
 from ccflow.types import (
     CLIAgentOptions,
     InitMessage,
     PermissionMode,
+    ResultMessage,
     SessionStats,
     StopMessage,
     TextMessage,
@@ -526,3 +528,121 @@ class TestSessionIntegration:
         assert stats.total_turns == 3
         assert stats.total_input_tokens == 225  # 50 + 75 + 100
         assert stats.total_output_tokens == 115  # 25 + 40 + 50
+
+
+class TestSessionHooks:
+    """Tests for Session hook integration."""
+
+    @pytest.mark.asyncio
+    async def test_stop_hook_fires_on_stop_message(self):
+        """Test STOP hook fires when StopMessage is received."""
+        mock_executor = MagicMock(spec=CLIExecutor)
+        mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "hook-test"},
+            {"type": "system", "subtype": "stop", "session_id": "hook-test",
+             "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in events:
+                yield event
+
+        mock_executor.execute = mock_execute
+
+        # Track hook calls
+        hook_calls = []
+        hook_registry = HookRegistry()
+
+        @hook_registry.on(HookEvent.STOP)
+        async def track_stop(ctx: HookContext) -> HookContext:
+            hook_calls.append(ctx)
+            return ctx
+
+        session = Session(executor=mock_executor, hooks=hook_registry)
+
+        async for _ in session.send_message("Test"):
+            pass
+
+        assert len(hook_calls) == 1
+        assert hook_calls[0].hook_event == HookEvent.STOP
+        assert isinstance(hook_calls[0].message, StopMessage)
+
+    @pytest.mark.asyncio
+    async def test_stop_hook_fires_on_result_message(self):
+        """Test STOP hook fires when ResultMessage is received (CLI completion)."""
+        mock_executor = MagicMock(spec=CLIExecutor)
+        mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+
+        # Simulate CLI output with 'result' event (no 'stop' event)
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "result-hook-test"},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]},
+             "model": "claude-sonnet", "message_id": "msg_123", "session_id": "result-hook-test",
+             "usage": {"input_tokens": 50, "output_tokens": 25}},
+            {"type": "result", "result": "Hello", "session_id": "result-hook-test",
+             "duration_ms": 1000, "num_turns": 1, "total_cost_usd": 0.001,
+             "usage": {"input_tokens": 50, "output_tokens": 25}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in events:
+                yield event
+
+        mock_executor.execute = mock_execute
+
+        # Track hook calls
+        hook_calls = []
+        hook_registry = HookRegistry()
+
+        @hook_registry.on(HookEvent.STOP)
+        async def track_stop(ctx: HookContext) -> HookContext:
+            hook_calls.append(ctx)
+            return ctx
+
+        session = Session(executor=mock_executor, hooks=hook_registry)
+
+        async for _ in session.send_message("Test"):
+            pass
+
+        assert len(hook_calls) == 1
+        assert hook_calls[0].hook_event == HookEvent.STOP
+        assert hook_calls[0].stop_reason == "result"
+        assert hook_calls[0].metadata.get("last_prompt") == "Test"
+        assert hook_calls[0].metadata.get("total_cost_usd") == 0.001
+
+    @pytest.mark.asyncio
+    async def test_stop_hook_receives_last_prompt(self):
+        """Test STOP hook receives last_prompt in metadata."""
+        mock_executor = MagicMock(spec=CLIExecutor)
+        mock_executor.build_flags = CLIExecutor(cli_path="/usr/bin/claude").build_flags
+
+        events = [
+            {"type": "system", "subtype": "init", "session_id": "prompt-test"},
+            {"type": "result", "result": "Response", "session_id": "prompt-test",
+             "duration_ms": 500, "num_turns": 1, "total_cost_usd": 0.0005,
+             "usage": {"input_tokens": 30, "output_tokens": 20}},
+        ]
+
+        async def mock_execute(*args, **kwargs):
+            for event in events:
+                yield event
+
+        mock_executor.execute = mock_execute
+
+        hook_registry = HookRegistry()
+        captured_prompt = []
+
+        @hook_registry.on(HookEvent.STOP)
+        async def capture_prompt(ctx: HookContext) -> HookContext:
+            captured_prompt.append(ctx.metadata.get("last_prompt"))
+            return ctx
+
+        session = Session(executor=mock_executor, hooks=hook_registry)
+
+        async for _ in session.send_message("What is the meaning of life?"):
+            pass
+
+        assert len(captured_prompt) == 1
+        assert captured_prompt[0] == "What is the meaning of life?"

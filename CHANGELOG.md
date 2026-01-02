@@ -5,6 +5,17 @@ All notable changes to ccflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-02
+
+### Fixed
+
+- **STOP hook now fires on ResultMessage**: Claude CLI produces `result` events (not `stop` events) on completion. The Session now triggers STOP hooks on both `StopMessage` and `ResultMessage`, ensuring hooks fire reliably at the end of every query.
+- **STOP hook includes `last_prompt` in metadata**: The user's original prompt is now passed through to the STOP hook context, enabling post-processing hooks to access the full interaction context.
+
+### Added
+
+- New tests for STOP hook behavior with both `StopMessage` and `ResultMessage`
+
 ## [0.2.0] - 2026-01-01
 
 ### Added
