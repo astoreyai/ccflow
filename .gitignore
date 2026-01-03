@@ -55,9 +55,28 @@ dmypy.json
 # Logs
 *.log
 
-# Local config
+# Local config & secrets
 .env
+.env.*
 .env.local
+.env.development
+.env.production
+*.local
+
+# Secrets & credentials (NEVER commit these)
+.secrets/
+secrets/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+*_credentials.json
+*_secret.json
+.claude-auth/
+.anthropic/
 
 # Jupyter
 .ipynb_checkpoints/
